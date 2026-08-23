@@ -24,6 +24,7 @@
           <h1>Akçakoyun</h1>
         </div>
         <div class="header-actions">
+          <button id="panel-toggle" class="button ghost" type="button" aria-expanded="true">Tools</button>
           <a class="button ghost" href="./assets/quality-report.pdf" target="_blank" rel="noreferrer">Quality report</a>
           <a class="button" href="./assets/akcakoyun-terrain.glb" download>Download model</a>
         </div>
@@ -38,7 +39,80 @@
           <small>33 MB · loading time depends on your connection</small>
         </div>
 
-        <aside class="survey-card">
+        <aside id="tool-panel" class="tool-panel">
+          <div class="panel-title">
+            <div><p class="eyebrow">Survey explorer</p><strong>Layers & tools</strong></div>
+            <button id="panel-close" class="icon-button" type="button" aria-label="Close tools">×</button>
+          </div>
+
+          <details open>
+            <summary>Layers</summary>
+            <div class="tool-body segmented" role="group" aria-label="Visible layer">
+              <button class="layer-button active" data-layer="model" type="button">Textured 3D</button>
+              <button class="layer-button" data-layer="terrain" type="button">Terrain DTM</button>
+              <button class="layer-button" data-layer="both" type="button">Both</button>
+            </div>
+            <p id="layer-note" class="tool-note">Hires textured reconstruction</p>
+          </details>
+
+          <details>
+            <summary>Appearance</summary>
+            <div class="tool-body form-grid">
+              <label>Opacity <output id="opacity-value">100%</output><input id="opacity" type="range" min="10" max="100" value="100" /></label>
+              <label>Terrain exaggeration <output id="exaggeration-value">1.0×</output><input id="exaggeration" type="range" min="10" max="40" value="10" /></label>
+              <label class="check"><input id="panel-wireframe" type="checkbox" /> Wireframe</label>
+            </div>
+          </details>
+
+          <details>
+            <summary>Measurement</summary>
+            <div class="tool-body button-grid">
+              <button data-measure="point" type="button">Point</button>
+              <button data-measure="distance" type="button">Distance</button>
+              <button data-measure="height" type="button">Height</button>
+              <button data-measure="area" type="button">Area</button>
+              <button id="finish-area" type="button">Finish area</button>
+              <button id="clear-measurements" type="button">Clear</button>
+            </div>
+            <p id="measurement-result" class="tool-note">Choose a tool, then tap the terrain.</p>
+          </details>
+
+          <details>
+            <summary>Camera</summary>
+            <div class="tool-body button-grid">
+              <button data-view="perspective" type="button">Perspective</button>
+              <button data-view="top" type="button">Top</button>
+              <button data-view="front" type="button">Front</button>
+              <button data-view="side" type="button">Side</button>
+              <button id="projection" type="button">Orthographic</button>
+              <button id="panel-reset" type="button">Reset</button>
+            </div>
+          </details>
+
+          <details>
+            <summary>Clipping</summary>
+            <div class="tool-body form-grid">
+              <label class="check"><input id="clip-enabled" type="checkbox" /> Enable elevation section</label>
+              <label>Section height <output id="clip-value">—</output><input id="clip-height" type="range" min="0" max="100" value="50" disabled /></label>
+              <label class="check"><input id="clip-reverse" type="checkbox" /> Reverse clip</label>
+            </div>
+          </details>
+
+          <details>
+            <summary>Survey summary</summary>
+            <div class="tool-body">
+              <dl>
+                <div><dt>Coverage</dt><dd>9,262 m²</dd></div>
+                <div><dt>Images</dt><dd>284 / 284</dd></div>
+                <div><dt>Ground resolution</dt><dd>2.54 cm</dd></div>
+                <div><dt>Dense points</dt><dd>39.9 million</dd></div>
+              </dl>
+              <p class="accuracy-note">GPS-georeferenced visualization. Not survey-grade without ground control points.</p>
+            </div>
+          </details>
+        </aside>
+
+        <aside class="survey-card compact-summary">
           <p class="eyebrow">Survey summary</p>
           <dl>
             <div><dt>Coverage</dt><dd>9,262 m²</dd></div>
@@ -53,7 +127,6 @@
           <button id="reset" type="button">Reset view</button>
           <button id="locate" type="button">Show my location</button>
           <button id="rotate" type="button" aria-pressed="false">Auto rotate</button>
-          <button id="wireframe" type="button" aria-pressed="false">Wireframe</button>
           <button id="fullscreen" type="button">Fullscreen</button>
         </nav>
 
