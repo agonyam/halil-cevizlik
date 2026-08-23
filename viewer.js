@@ -175,8 +175,8 @@ function showDevicePosition(position) {
   }
 
   const { easting, northing } = latLonToUtm35(position.coords.latitude, position.coords.longitude);
-  const x = easting - 511838 - modelCenter.x;
-  const y = northing - 4405511 - modelCenter.y;
+  const x = easting - 511796 - modelCenter.x;
+  const y = northing - 4405516 - modelCenter.y;
   const raycaster = new THREE.Raycaster(new THREE.Vector3(x, y, modelBounds.max.z + 100), new THREE.Vector3(0, 0, -1));
   const hit = raycaster.intersectObject(model, true)[0];
 
