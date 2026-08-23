@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#111713" />
+    <meta name="description" content="Interactive 3D terrain reconstruction of Akçakoyun, captured on 23 August 2026." />
+    <title>Akçakoyun · 3D Terrain Survey</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <main id="viewer" aria-label="Interactive 3D terrain model">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Aerial survey · 23 August 2026</p>
+          <h1>Akçakoyun</h1>
+        </div>
+        <div class="header-actions">
+          <a class="button ghost" href="./assets/quality-report.pdf" target="_blank" rel="noreferrer">Quality report</a>
+          <a class="button" href="./assets/akcakoyun-terrain.glb" download>Download model</a>
+        </div>
+      </header>
+
+      <section class="viewport" aria-live="polite">
+        <canvas id="scene"></canvas>
+        <div id="loading" class="loading-card">
+          <p class="eyebrow">Loading 3D terrain</p>
+          <strong id="loading-label">Preparing viewer…</strong>
+          <div class="progress-track"><span id="progress"></span></div>
+          <small>64 MB · loading time depends on your connection</small>
+        </div>
+
+        <aside class="survey-card">
+          <p class="eyebrow">Survey summary</p>
+          <dl>
+            <div><dt>Coverage</dt><dd>9,262 m²</dd></div>
+            <div><dt>Images</dt><dd>284 / 284</dd></div>
+            <div><dt>Ground resolution</dt><dd>2.54 cm</dd></div>
+            <div><dt>Dense points</dt><dd>39.9 million</dd></div>
+          </dl>
+          <p class="accuracy-note">GPS-georeferenced visualization. Not survey-grade without ground control points.</p>
+        </aside>
+
+        <nav class="controls" aria-label="Model controls">
+          <button id="reset" type="button">Reset view</button>
+          <button id="rotate" type="button" aria-pressed="false">Auto rotate</button>
+          <button id="wireframe" type="button" aria-pressed="false">Wireframe</button>
+          <button id="fullscreen" type="button">Fullscreen</button>
+        </nav>
+
+        <p class="hint">Drag to orbit · Scroll to zoom · Right-drag to pan</p>
+      </section>
+    </main>
+    <script type="module" src="./viewer.js"></script>
+  </body>
+</html>
