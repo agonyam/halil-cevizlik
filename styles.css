@@ -73,6 +73,22 @@ dd { margin: 0; font-weight: 700; }
 
 .controls { right: 28px; bottom: 28px; display: flex; gap: 8px; padding: 8px; border-radius: 999px; }
 .controls button { padding: 9px 13px; }
+.location-status {
+  position: fixed;
+  z-index: 4;
+  right: 28px;
+  bottom: 92px;
+  max-width: min(360px, calc(100vw - 28px));
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--panel);
+  padding: 11px 14px;
+  color: #dce4dc;
+  font-size: 12px;
+  line-height: 1.4;
+  backdrop-filter: blur(16px);
+}
+.location-status[hidden] { display: none; }
 .hint { position: fixed; z-index: 3; left: 50%; bottom: 30px; margin: 0; transform: translateX(-50%); color: rgba(236, 241, 235, 0.66); font-size: 12px; }
 
 @media (max-width: 760px) {
@@ -82,5 +98,6 @@ dd { margin: 0; font-weight: 700; }
   .survey-card { left: 14px; bottom: 78px; width: 220px; padding: 14px; }
   .controls { left: 12px; right: 12px; bottom: 12px; overflow-x: auto; justify-content: flex-start; }
   .controls button { white-space: nowrap; }
+  .location-status { left: 14px; right: 14px; bottom: 75px; max-width: none; }
   .hint { display: none; }
 }
