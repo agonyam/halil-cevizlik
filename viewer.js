@@ -18,9 +18,67 @@
   }
 
   window.viewer = new Potree.Viewer(document.getElementById('potree_render_area'));
+  const renderArea = document.getElementById('potree_render_area');
+  const mobilePointBudget = 2000000;
+  const restingPointBudget = window.innerWidth <= 600 ? mobilePointBudget : 6000000;
+  const movingPointBudget = window.innerWidth <= 600 ? 750000 : 2000000;
+  const potreeLoop = viewer.loop.bind(viewer);
+  let survey3dActive = new URLSearchParams(location.search).get('view') !== '2d';
+  let lastRenderedFrame = 0;
+  let interactionTimer = null;
+
+  function limitedPotreeLoop(timestamp) {
+    if (!survey3dActive || document.hidden) return;
+    if (timestamp - lastRenderedFrame < 32) return;
+    lastRenderedFrame = timestamp;
+    potreeLoop(timestamp);
+  }
+
+  function syncPotreeLoop() {
+    const shouldRender = survey3dActive && !document.hidden;
+    viewer.renderer.setAnimationLoop(null);
+    if (shouldRender) {
+      viewer.clock.getDelta();
+      lastRenderedFrame = 0;
+      viewer.renderer.setAnimationLoop(limitedPotreeLoop);
+    }
+  }
+
+  function beginInteraction() {
+    if (!survey3dActive) return;
+    window.clearTimeout(interactionTimer);
+    viewer.setPointBudget(movingPointBudget);
+    viewer.setEDLEnabled(false);
+  }
+
+  function endInteraction() {
+    window.clearTimeout(interactionTimer);
+    interactionTimer = window.setTimeout(function () {
+      if (!survey3dActive) return;
+      viewer.setPointBudget(restingPointBudget);
+      const modelToggle = document.getElementById('toggle-textured-model');
+      viewer.setEDLEnabled(!modelToggle || !modelToggle.checked);
+    }, 300);
+  }
+
+  window.setSurvey3dActive = function (active) {
+    survey3dActive = Boolean(active);
+    if (!survey3dActive) {
+      window.clearTimeout(interactionTimer);
+      viewer.setPointBudget(movingPointBudget);
+    } else viewer.setPointBudget(restingPointBudget);
+    syncPotreeLoop();
+  };
+
+  document.addEventListener('visibilitychange', syncPotreeLoop);
+  renderArea.addEventListener('pointerdown', beginInteraction, { passive: true });
+  renderArea.addEventListener('pointerup', endInteraction, { passive: true });
+  renderArea.addEventListener('pointercancel', endInteraction, { passive: true });
+  renderArea.addEventListener('wheel', function () { beginInteraction(); endInteraction(); }, { passive: true });
+  syncPotreeLoop();
   viewer.setEDLEnabled(true);
   viewer.setFOV(60);
-  viewer.setPointBudget(window.innerWidth <= 600 ? 2000000 : 10000000);
+  viewer.setPointBudget(survey3dActive ? restingPointBudget : movingPointBudget);
   viewer.setBackground('gradient');
   viewer.loadSettingsFromURL();
   viewer.scene.scene.add(new THREE.AmbientLight(0x404040, 2));

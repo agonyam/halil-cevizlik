@@ -542,6 +542,7 @@
   });
 
   function showMap() {
+    if (window.setSurvey3dActive) window.setSurvey3dActive(false);
     document.querySelector('.model-view').classList.add('map-active');
     mapViewElement.hidden = false;
     history.replaceState(null, '', location.pathname + '?view=2d');
@@ -554,6 +555,7 @@
     stopDrawing();
     mapViewElement.hidden = true;
     document.querySelector('.model-view').classList.remove('map-active');
+    if (window.setSurvey3dActive) window.setSurvey3dActive(true);
     history.replaceState(null, '', location.pathname);
   }
 
