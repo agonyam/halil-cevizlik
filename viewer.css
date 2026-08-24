@@ -42,6 +42,8 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
 .elevation-crs { margin: 7px 0 0; color: #d8e0e2; font-size: 11px; line-height: 1.4; }
 .elevation-status { min-height: 14px; margin: 6px 0 0; color: #9fd4e4; font-size: 11px; }
 #map-coordinates { position: absolute; z-index: 4; left: 12px; bottom: 12px; border-radius: 3px; background: rgba(24, 42, 47, .88); padding: 6px 9px; color: #fff; font: 12px monospace; }
+#map-view .ol-scale-line { left: 12px; bottom: 47px; }
+#map-view .ol-attribution { right: 14px; bottom: 55px; }
 .map-quick-layers { position: absolute; z-index: 6; top: 10px; right: 10px; display: flex; gap: 4px; }
 .map-quick-layers button, .map-bottom-actions button { border: 1px solid #819095; border-radius: 3px; background: rgba(65,88,94,.94); padding: 7px 10px; color: white; cursor: pointer; }
 .map-quick-layers button.active { background: #2e859f; }
@@ -111,4 +113,6 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
   .map-quick-layers { left: 6px; right: 6px; overflow-x: auto; }
   .map-quick-layers button { white-space: nowrap; }
   #map-coordinates { left: 8px; bottom: 56px; max-width: calc(100% - 16px); font-size: 10px; }
+  #map-view .ol-scale-line { left: 8px; bottom: 92px; }
+  #map-view .ol-attribution { right: 8px; bottom: 92px; }
 }
