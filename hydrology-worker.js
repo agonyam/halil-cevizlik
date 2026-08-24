@@ -21,7 +21,9 @@ self.onmessage = function (event) {
     const dt = totalSeconds / steps;
     const snapshotCount = Math.min(61, steps + 1);
     const snapshotScale = .0005;
+    const infiltrationSnapshotScale = .0005;
     const snapshots = [];
+    const infiltrationSnapshots = [];
     const soil = input.soil;
     const conductivity = soil.conductivity / 1000 / 3600;
     const suctionMoisture = soil.suction * soil.moistureDeficit / 1000;
@@ -33,15 +35,20 @@ self.onmessage = function (event) {
     let outflowVolume = 0;
     let nextSnapshot = 0;
     let maxDepth = 0;
+    let maxInfiltrationDepth = 0;
 
     function captureSnapshot() {
       const snapshot = new Uint16Array(size);
+      const infiltrationSnapshot = new Uint16Array(size);
       for (let i = 0; i < size; i += 1) {
         if (!valid[i]) continue;
         snapshot[i] = Math.min(65535, Math.round(water[i] / snapshotScale));
+        infiltrationSnapshot[i] = Math.min(65535, Math.round(cumulativeInfiltration[i] / infiltrationSnapshotScale));
         maxDepth = Math.max(maxDepth, water[i]);
+        maxInfiltrationDepth = Math.max(maxInfiltrationDepth, cumulativeInfiltration[i]);
       }
       snapshots.push(snapshot);
+      infiltrationSnapshots.push(infiltrationSnapshot);
     }
 
     function edgeFlux(first, second, distance) {
@@ -133,15 +140,18 @@ self.onmessage = function (event) {
     for (let i = 0; i < size; i += 1) if (valid[i]) surfaceVolume += water[i] * input.cellArea;
     const result = {
       snapshots: snapshots.map(function (snapshot) { return snapshot.buffer; }),
+      infiltrationSnapshots: infiltrationSnapshots.map(function (snapshot) { return snapshot.buffer; }),
       snapshotScale: snapshotScale,
+      infiltrationSnapshotScale: infiltrationSnapshotScale,
       appliedLiters: appliedVolume * 1000,
       infiltratedLiters: infiltratedVolume * 1000,
       surfaceLiters: surfaceVolume * 1000,
       outflowLiters: outflowVolume * 1000,
       maxDepth: maxDepth,
+      maxInfiltrationDepth: maxInfiltrationDepth,
       steps: steps
     };
-    self.postMessage(result, result.snapshots);
+    self.postMessage(result, result.snapshots.concat(result.infiltrationSnapshots));
   } catch (error) {
     self.postMessage({ error: error && error.message ? error.message : String(error) });
   }

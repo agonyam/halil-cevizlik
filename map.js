@@ -651,6 +651,7 @@
         worker.terminate();
         if (event.data.error) { reject(new Error(event.data.error)); return; }
         event.data.snapshots = event.data.snapshots.map(function (buffer) { return new Uint16Array(buffer); });
+        event.data.infiltrationSnapshots = event.data.infiltrationSnapshots.map(function (buffer) { return new Uint16Array(buffer); });
         resolve(event.data);
       };
       worker.onerror = function (event) { worker.terminate(); reject(new Error(event.message || 'Hydrology worker failed')); };
@@ -679,73 +680,30 @@
     });
   }
 
-  function hydrologyCellCoordinate(index, grid) {
-    const x = index % grid.width;
-    const y = Math.floor(index / grid.width);
-    return [
-      surveyExtent[0] + (x + .5) / grid.width * (surveyExtent[2] - surveyExtent[0]),
-      surveyExtent[3] - (y + .5) / grid.height * (surveyExtent[3] - surveyExtent[1])
-    ];
-  }
-
-  function coordinateInRing(coordinate, ring) {
-    let inside = false;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
-      const xi = ring[i][0]; const yi = ring[i][1];
-      const xj = ring[j][0]; const yj = ring[j][1];
-      if ((yi > coordinate[1]) !== (yj > coordinate[1]) && coordinate[0] < (xj - xi) * (coordinate[1] - yi) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
-  }
-
-  function coordinateInPolygon(coordinate, rings) {
-    if (!rings.length || !coordinateInRing(coordinate, rings[0])) return false;
-    for (let i = 1; i < rings.length; i += 1) if (coordinateInRing(coordinate, rings[i])) return false;
-    return true;
-  }
-
-  function createIrrigationWetting(grid, retainedLiters, entryCoordinates) {
-    const wetting = new Float32Array(grid.size);
-    const arrivals = new Float32Array(grid.size);
-    arrivals.fill(Infinity);
-    if (!retainedLiters || !entryCoordinates.length) return { wetting: wetting, arrivals: arrivals, maxDepthMm: 0 };
-    const zones = waterZoneSource.getFeatures();
-    const targetDepth = Math.max(.1, numberValue('water-depth', 5));
-    if (zones.length) {
-      const cells = [];
-      for (let i = 0; i < grid.size; i += 1) {
-        if (!grid.valid[i]) continue;
-        const coordinate = hydrologyCellCoordinate(i, grid);
-        if (zones.some(function (feature) { return coordinateInPolygon(coordinate, feature.getGeometry().getCoordinates()); })) cells.push(i);
+  function sourceWeightsFromEntries(grid, entryCoordinates) {
+    const weights = new Float32Array(grid.size);
+    entryCoordinates.forEach(function (coordinate) {
+      const x = Math.max(0, Math.min(grid.width - 1, Math.floor((coordinate[0] - surveyExtent[0]) / (surveyExtent[2] - surveyExtent[0]) * grid.width)));
+      const y = Math.max(0, Math.min(grid.height - 1, Math.floor((surveyExtent[3] - coordinate[1]) / (surveyExtent[3] - surveyExtent[1]) * grid.height)));
+      let nearest = -1;
+      let nearestDistance = Infinity;
+      for (let radius = 0; radius <= 8 && nearest < 0; radius += 1) {
+        for (let dy = -radius; dy <= radius; dy += 1) {
+          for (let dx = -radius; dx <= radius; dx += 1) {
+            const nx = x + dx; const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= grid.width || ny >= grid.height) continue;
+            const index = ny * grid.width + nx;
+            const distance = dx * dx + dy * dy;
+            if (grid.valid[index] && distance < nearestDistance) { nearest = index; nearestDistance = distance; }
+          }
+        }
       }
-      const depth = cells.length ? retainedLiters / (cells.length * grid.cellArea) : 0;
-      cells.forEach(function (index) {
-        wetting[index] = depth;
-        let nearest = Infinity;
-        const coordinate = hydrologyCellCoordinate(index, grid);
-        entryCoordinates.forEach(function (entry) { nearest = Math.min(nearest, Math.hypot(coordinate[0] - entry[0], coordinate[1] - entry[1])); });
-        arrivals[index] = Math.min(.55, .04 + nearest / Math.max(1, Math.sqrt(cells.length * grid.cellArea)) * .22);
-      });
-      return { wetting: wetting, arrivals: arrivals, maxDepthMm: Math.max(targetDepth, depth) };
-    }
-    const perEntry = retainedLiters / entryCoordinates.length;
-    const radiusMeters = Math.max(2.5, Math.min(35, Math.sqrt(Math.max(1, perEntry / targetDepth) / Math.PI)));
-    const latitude = ol.proj.toLonLat(entryCoordinates[0])[1] * Math.PI / 180;
-    const radius = radiusMeters / Math.cos(latitude);
-    entryCoordinates.forEach(function (entry) {
-      for (let i = 0; i < grid.size; i += 1) {
-        if (!grid.valid[i]) continue;
-        const coordinate = hydrologyCellCoordinate(i, grid);
-        const distance = Math.hypot(coordinate[0] - entry[0], coordinate[1] - entry[1]);
-        if (distance > radius) continue;
-        const falloff = Math.max(.2, 1 - distance / radius);
-        wetting[i] += targetDepth * falloff;
-        arrivals[i] = Math.min(arrivals[i], .03 + distance / radius * .42);
-      }
+      if (nearest >= 0) weights[nearest] += 1;
     });
-    let maxDepthMm = targetDepth;
-    for (let i = 0; i < wetting.length; i += 1) maxDepthMm = Math.max(maxDepthMm, wetting[i]);
-    return { wetting: wetting, arrivals: arrivals, maxDepthMm: maxDepthMm };
+    let total = 0;
+    for (let i = 0; i < weights.length; i += 1) total += weights[i];
+    if (total) for (let i = 0; i < weights.length; i += 1) weights[i] /= total;
+    return weights;
   }
 
   function renderWaterTimeline(progress) {
@@ -756,7 +714,19 @@
     waterSurfaceCanvas.height = grid.height;
     const context = waterSurfaceCanvas.getContext('2d');
     const image = context.createImageData(grid.width, grid.height);
-    if (state.wetting) {
+    if (state.infiltrationSnapshots) {
+      const infiltrationSnapshot = state.infiltrationSnapshots[Math.min(state.infiltrationSnapshots.length - 1, Math.round(progress * (state.infiltrationSnapshots.length - 1)))];
+      for (let i = 0; i < grid.size; i += 1) {
+        if (!grid.valid[i] || !infiltrationSnapshot[i]) continue;
+        const depth = infiltrationSnapshot[i] * state.infiltrationSnapshotScale;
+        const strength = Math.min(1, Math.sqrt(depth / Math.max(.0005, state.maxInfiltrationDepth)));
+        const offset = i * 4;
+        image.data[offset] = 0;
+        image.data[offset + 1] = 205 + Math.round(50 * strength);
+        image.data[offset + 2] = 115 + Math.round(35 * strength);
+        image.data[offset + 3] = Math.round(55 + 125 * strength);
+      }
+    } else if (state.wetting) {
       for (let i = 0; i < grid.size; i += 1) {
         if (!state.wetting[i]) continue;
         const arrival = state.wettingArrivals[i];
@@ -909,15 +879,6 @@
     return zoneArea;
   }
 
-  function sourceWeightsFromWetting(wetting) {
-    const weights = new Float32Array(wetting.length);
-    let total = 0;
-    for (let i = 0; i < wetting.length; i += 1) total += wetting[i];
-    if (!total) return weights;
-    for (let i = 0; i < wetting.length; i += 1) weights[i] = wetting[i] / total;
-    return weights;
-  }
-
   function runIrrigationSimulation() {
     const entries = waterEntrySource.getFeatures();
     const flowPerEntry = numberValue('water-flow', 8);
@@ -945,13 +906,11 @@
       return Promise.resolve();
     }
     const grid = buildHydrologyGrid();
-    const sourcePreview = createIrrigationWetting(grid, applied, entryCoordinates);
     document.getElementById('water-status').textContent = 'Running Green–Ampt infiltration and 2D diffusion-wave routing…';
-    return solveHydrology({ mode: 'irrigation', totalMinutes: duration, totalFlow: entries.length * flowPerEntry, sourceWeights: sourceWeightsFromWetting(sourcePreview.wetting), soil: soil }).then(function (solved) {
+    return solveHydrology({ mode: 'irrigation', totalMinutes: duration, totalFlow: entries.length * flowPerEntry, sourceWeights: sourceWeightsFromEntries(grid, entryCoordinates), soil: soil }).then(function (solved) {
       const infiltrated = solved.infiltratedLiters;
       const runoff = Math.max(0, solved.appliedLiters - infiltrated);
-      const wetting = createIrrigationWetting(grid, infiltrated, entryCoordinates);
-      waterSimulationState = { mode: 'irrigation', totalMinutes: duration, grid: grid, snapshots: solved.snapshots, snapshotScale: solved.snapshotScale, maxPoolDepth: solved.maxDepth, wetting: wetting.wetting, wettingArrivals: wetting.arrivals, maxWettingDepthMm: wetting.maxDepthMm };
+      waterSimulationState = { mode: 'irrigation', totalMinutes: duration, grid: grid, snapshots: solved.snapshots, snapshotScale: solved.snapshotScale, maxPoolDepth: solved.maxDepth, infiltrationSnapshots: solved.infiltrationSnapshots, infiltrationSnapshotScale: solved.infiltrationSnapshotScale, maxInfiltrationDepth: solved.maxInfiltrationDepth };
       document.getElementById('water-timeline').hidden = false;
       setWaterTimeline(0); playWaterTimeline();
       document.getElementById('water-applied').textContent = formatVolume(solved.appliedLiters) + ' per run';
@@ -960,7 +919,7 @@
       document.getElementById('water-path').textContent = '2D diffusion wave · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm · ' + formatVolume(solved.outflowLiters) + ' left survey';
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-legend').hidden = false;
-      document.getElementById('water-status').textContent = 'Green–Ampt infiltration + mass-conserving 2D diffusion wave · ' + (drawnArea ? drawnArea.toFixed(0) + ' m² drawn zone.' : 'entry footprint estimated from the watering target.');
+      document.getElementById('water-status').textContent = 'Point outlets injected at entries · DTM-derived downhill routing · Green–Ampt infiltration + mass-conserving 2D diffusion wave.';
     });
   }
 
@@ -976,7 +935,7 @@
     return solveHydrology({ mode: 'rain', totalMinutes: duration, rainIntensity: intensity, soil: soil }).then(function (solved) {
       const infiltrated = solved.infiltratedLiters;
       const runoff = Math.max(0, solved.appliedLiters - infiltrated);
-      waterSimulationState = { mode: 'rain', totalMinutes: duration, grid: buildHydrologyGrid(), snapshots: solved.snapshots, snapshotScale: solved.snapshotScale, maxPoolDepth: solved.maxDepth };
+      waterSimulationState = { mode: 'rain', totalMinutes: duration, grid: buildHydrologyGrid(), snapshots: solved.snapshots, snapshotScale: solved.snapshotScale, maxPoolDepth: solved.maxDepth, infiltrationSnapshots: solved.infiltrationSnapshots, infiltrationSnapshotScale: solved.infiltrationSnapshotScale, maxInfiltrationDepth: solved.maxInfiltrationDepth };
       document.getElementById('water-timeline').hidden = false;
       setWaterTimeline(0); playWaterTimeline();
       document.getElementById('water-applied').textContent = formatVolume(solved.appliedLiters) + ' over survey (' + rainDepth.toFixed(1) + ' mm)';
