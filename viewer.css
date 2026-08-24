@@ -42,6 +42,9 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
 .irrigation-fields label > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; color: #cbd6d8; font-size: 11px; }
 .irrigation-fields input, .irrigation-fields select { min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid #9dabad; border-radius: 3px; background: #f5f7f7; padding: 5px; color: #24363b; }
 .irrigation-actions { margin-top: 9px; }
+.water-opacity-control { display: grid; grid-template-columns: 1fr minmax(90px, 1.35fr) 38px; align-items: center; gap: 7px; margin-top: 9px; color: #c6d4d7; font-size: 11px; }
+.water-opacity-control input { width: 100%; accent-color: #1bbcf0; }
+.water-opacity-control output { color: #fff; font: 11px monospace; text-align: right; }
 .water-results { margin: 10px 0 0; border-top: 1px solid #577077; }
 .water-results div { display: grid; grid-template-columns: 1fr 1.55fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(96,119,125,.45); font-size: 11px; }
 .water-results dt { color: #b9c9cc; }
@@ -51,6 +54,7 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
 .water-legend[hidden] { display: none; }
 .water-legend span { display: flex; align-items: center; gap: 5px; }
 .water-legend i { display: inline-block; flex: 0 0 auto; }
+.water-key-wetting { width: 12px; height: 10px; border: 1px solid #d8fff5; border-radius: 2px; background: rgba(14, 211, 166, .8); }
 .water-key-flow { width: 24px; height: 4px; border: 2px solid #fff; border-radius: 3px; background: #087be8; }
 .water-key-pool { width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #075be8; }
 .water-key-entry { width: 10px; height: 10px; border: 2px solid #102d52; border-radius: 50%; background: #ffdc52; }

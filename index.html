@@ -109,6 +109,7 @@
             <button id="water-run" type="button">▶ Simulate</button>
             <button id="water-clear" type="button">× Clear</button>
           </div>
+          <label class="water-opacity-control" for="water-opacity"><span>Simulation opacity</span><input id="water-opacity" type="range" min="0.1" max="1" step="0.05" value="1" aria-label="Water simulation opacity"><output id="water-opacity-value" for="water-opacity">100%</output></label>
           <dl id="water-results" class="water-results" hidden>
             <div><dt>Applied</dt><dd id="water-applied">—</dd></div>
             <div><dt>Estimated infiltration</dt><dd id="water-infiltration">—</dd></div>
@@ -130,7 +131,7 @@
           <button id="map-fullscreen" type="button">⛶ Fullscreen</button>
         </div>
       </aside>
-      <div id="water-legend" class="water-legend" hidden><strong>Water simulation</strong><span><i class="water-key-flow"></i>Runoff flow</span><span><i class="water-key-pool"></i>Water buildup</span><span><i class="water-key-entry"></i>Water entry</span></div>
+      <div id="water-legend" class="water-legend" hidden><strong>Water simulation</strong><span><i class="water-key-wetting"></i>Irrigated area</span><span><i class="water-key-flow"></i>Runoff flow</span><span><i class="water-key-pool"></i>Water buildup</span><span><i class="water-key-entry"></i>Water entry</span></div>
       <div id="water-timeline" class="water-timeline" hidden>
         <button id="water-play" type="button" aria-label="Play water simulation">▶</button>
         <input id="water-time" type="range" min="0" max="100" step="1" value="100" aria-label="Water simulation timeline">
