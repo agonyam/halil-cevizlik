@@ -22,12 +22,17 @@
   }
 
   const elevationCanvas = document.createElement('canvas');
+  const waterSurfaceCanvas = document.createElement('canvas');
   let elevationMetadata = null;
   let elevationPixels = null;
   let hillshadePixels = null;
   let elevationActive = null;
   let elevationLoadToken = 0;
   let elevationRenderTimer = null;
+  let hydrologyGrid = null;
+  let waterSimulationState = null;
+  let waterAnimationFrame = null;
+  let waterPreviousTerrainOpacity = null;
   const elevationRanges = {
     dtm: { min: 280.370, max: 284.936 },
     dsm: { min: 281.165, max: 297.314 }
@@ -56,6 +61,24 @@
     }
   });
   const elevationLayer = new ol.layer.Image({ visible: false, opacity: 1, extent: surveyExtent, source: elevationSource });
+  const waterSurfaceSource = new ol.source.ImageCanvas({
+    projection: 'EPSG:3857',
+    ratio: 1,
+    canvasFunction: function (extent, resolution, pixelRatio, size) {
+      const canvas = document.createElement('canvas');
+      canvas.width = size[0]; canvas.height = size[1];
+      if (!waterSurfaceCanvas.width) return canvas;
+      const context = canvas.getContext('2d');
+      context.imageSmoothingEnabled = true;
+      const x = (surveyExtent[0] - extent[0]) / resolution * pixelRatio;
+      const y = (extent[3] - surveyExtent[3]) / resolution * pixelRatio;
+      const width = (surveyExtent[2] - surveyExtent[0]) / resolution * pixelRatio;
+      const height = (surveyExtent[3] - surveyExtent[1]) / resolution * pixelRatio;
+      context.drawImage(waterSurfaceCanvas, x, y, width, height);
+      return canvas;
+    }
+  });
+  const waterSurfaceLayer = new ol.layer.Image({ visible: false, opacity: 1, extent: surveyExtent, source: waterSurfaceSource });
 
   const layers = {
     satellite: new ol.layer.Tile({
@@ -151,7 +174,7 @@
 
   const map = new ol.Map({
     target: 'map',
-    layers: [layers.satellite, layers.osm, layers.orthophoto, layers['plant-health'], elevationLayer, layers.contours, layers.cameras, importedLayer, sketchLayer, waterZoneLayer, waterPipeLayer, waterResultLayer, waterEntryLayer, locationLayer],
+    layers: [layers.satellite, layers.osm, layers.orthophoto, layers['plant-health'], elevationLayer, layers.contours, layers.cameras, importedLayer, sketchLayer, waterZoneLayer, waterPipeLayer, waterSurfaceLayer, waterResultLayer, waterEntryLayer, locationLayer],
     controls: ol.control.defaults().extend([new ol.control.ScaleLine()]),
     view: new ol.View({ center: ol.extent.getCenter(surveyExtent), zoom: 19, minZoom: 14, maxZoom: 23 })
   });
@@ -343,6 +366,7 @@
     }).then(function (pixels) {
       if (token !== elevationLoadToken) return;
       elevationPixels = pixels;
+      if (name === 'dtm') hydrologyGrid = null;
       hillshadePixels = null;
       renderElevation();
       if (elevationStyle.shading === 'none') return null;
@@ -485,13 +509,6 @@
     return [x, y];
   }
 
-  function elevationPixelToCoordinate(x, y) {
-    return [
-      surveyExtent[0] + x / (elevationPixels.width - 1) * (surveyExtent[2] - surveyExtent[0]),
-      surveyExtent[3] - y / (elevationPixels.height - 1) * (surveyExtent[3] - surveyExtent[1])
-    ];
-  }
-
   function elevationAtPixel(x, y) {
     x = Math.round(x); y = Math.round(y);
     if (!elevationPixels || x < 0 || y < 0 || x >= elevationPixels.width || y >= elevationPixels.height) return null;
@@ -506,45 +523,238 @@
     return pixel ? elevationAtPixel(pixel[0], pixel[1]) : null;
   }
 
-  function traceWater(coordinate) {
-    const start = coordinateToElevationPixel(coordinate);
-    if (!start || elevationAtPixel(start[0], start[1]) === null) return null;
-    let x = start[0]; let y = start[1];
-    let current = elevationAtPixel(x, y);
-    const startElevation = current;
-    const coordinates = [elevationPixelToCoordinate(x, y)];
-    const visited = {};
-    const directions = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
-    for (let stepIndex = 0; stepIndex < 520; stepIndex += 1) {
-      const key = Math.round(x / 4) + ':' + Math.round(y / 4);
-      if (visited[key]) break;
-      visited[key] = true;
-      let best = null;
-      [8, 16, 28, 44].some(function (radius) {
-        directions.forEach(function (direction) {
-          const nx = x + direction[0] * radius;
-          const ny = y + direction[1] * radius;
-          const z = elevationAtPixel(nx, ny);
-          if (z !== null && z < current - .004 && (!best || z < best.z)) best = { x: nx, y: ny, z: z };
-        });
-        return Boolean(best);
-      });
-      if (!best) break;
-      x = best.x; y = best.y; current = best.z;
-      coordinates.push(elevationPixelToCoordinate(x, y));
-      if (x < 10 || y < 10 || x > elevationPixels.width - 11 || y > elevationPixels.height - 11) break;
+  function MinHeap() { this.items = []; }
+  MinHeap.prototype.push = function (index, value) {
+    const item = { index: index, value: value };
+    let position = this.items.length;
+    this.items.push(item);
+    while (position > 0) {
+      const parent = Math.floor((position - 1) / 2);
+      if (this.items[parent].value <= value) break;
+      this.items[position] = this.items[parent];
+      position = parent;
     }
-    return { coordinates: coordinates, drop: Math.max(0, startElevation - current), end: coordinates[coordinates.length - 1], length: distanceMeters(coordinates) };
+    this.items[position] = item;
+  };
+  MinHeap.prototype.pop = function () {
+    if (!this.items.length) return null;
+    const root = this.items[0];
+    const tail = this.items.pop();
+    if (this.items.length) {
+      let position = 0;
+      while (true) {
+        const left = position * 2 + 1;
+        const right = left + 1;
+        if (left >= this.items.length) break;
+        let child = right < this.items.length && this.items[right].value < this.items[left].value ? right : left;
+        if (this.items[child].value >= tail.value) break;
+        this.items[position] = this.items[child];
+        position = child;
+      }
+      this.items[position] = tail;
+    }
+    return root;
+  };
+
+  const hydrologyDirections = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+
+  function buildHydrologyGrid() {
+    if (hydrologyGrid) return hydrologyGrid;
+    const width = 240;
+    const height = Math.max(180, Math.round(width * elevationPixels.height / elevationPixels.width));
+    const size = width * height;
+    const elevation = new Float32Array(size);
+    const filled = new Float32Array(size);
+    const valid = new Uint8Array(size);
+    const visited = new Uint8Array(size);
+    const parent = new Int32Array(size);
+    parent.fill(-1); filled.fill(Infinity);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const sourceX = Math.round((x + .5) / width * (elevationPixels.width - 1));
+        const sourceY = Math.round((y + .5) / height * (elevationPixels.height - 1));
+        const value = elevationAtPixel(sourceX, sourceY);
+        const index = y * width + x;
+        if (value !== null) { valid[index] = 1; elevation[index] = value; }
+      }
+    }
+    const heap = new MinHeap();
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        if (!valid[index]) continue;
+        let boundary = x === 0 || y === 0 || x === width - 1 || y === height - 1;
+        if (!boundary) {
+          for (let d = 0; d < hydrologyDirections.length; d += 1) {
+            const nx = x + hydrologyDirections[d][0]; const ny = y + hydrologyDirections[d][1];
+            if (!valid[ny * width + nx]) { boundary = true; break; }
+          }
+        }
+        if (boundary) {
+          visited[index] = 1;
+          filled[index] = elevation[index];
+          heap.push(index, filled[index]);
+        }
+      }
+    }
+    const order = [];
+    let item;
+    while ((item = heap.pop())) {
+      const index = item.index;
+      order.push(index);
+      const x = index % width; const y = Math.floor(index / width);
+      for (let d = 0; d < hydrologyDirections.length; d += 1) {
+        const nx = x + hydrologyDirections[d][0]; const ny = y + hydrologyDirections[d][1];
+        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+        const neighbor = ny * width + nx;
+        if (!valid[neighbor] || visited[neighbor]) continue;
+        visited[neighbor] = 1;
+        parent[neighbor] = index;
+        filled[neighbor] = Math.max(elevation[neighbor], filled[index]);
+        heap.push(neighbor, filled[neighbor]);
+      }
+    }
+    const southwest = toUtm([surveyExtent[0], surveyExtent[1]]);
+    const northeast = toUtm([surveyExtent[2], surveyExtent[3]]);
+    const cellArea = Math.abs((northeast[0] - southwest[0]) * (northeast[1] - southwest[1])) / size;
+    hydrologyGrid = { width: width, height: height, size: size, elevation: elevation, filled: filled, valid: valid, parent: parent, order: order, cellArea: cellArea };
+    return hydrologyGrid;
   }
 
-  function addWaterTrace(trace) {
-    if (!trace || trace.coordinates.length < 2) return;
-    const line = new ol.Feature(new ol.geom.LineString(trace.coordinates));
-    line.set('waterType', 'flow');
-    waterResultSource.addFeature(line);
-    const pool = new ol.Feature(new ol.geom.Point(trace.end));
-    pool.set('waterType', 'pool');
-    waterResultSource.addFeature(pool);
+  function coordinateToHydrologyIndex(coordinate, grid) {
+    const x = Math.max(0, Math.min(grid.width - 1, Math.floor((coordinate[0] - surveyExtent[0]) / (surveyExtent[2] - surveyExtent[0]) * grid.width)));
+    const y = Math.max(0, Math.min(grid.height - 1, Math.floor((surveyExtent[3] - coordinate[1]) / (surveyExtent[3] - surveyExtent[1]) * grid.height)));
+    return y * grid.width + x;
+  }
+
+  function createHydrologyState(mode, totalMinutes, runoffLiters, entryCoordinates) {
+    const grid = buildHydrologyGrid();
+    const water = new Float64Array(grid.size);
+    const arrivals = new Float32Array(grid.size);
+    arrivals.fill(mode === 'rain' ? 0 : Infinity);
+    let baseVolume = 1;
+    const sourceIndices = [];
+    if (mode === 'rain') {
+      let validCount = 0;
+      for (let i = 0; i < grid.size; i += 1) if (grid.valid[i]) validCount += 1;
+      baseVolume = validCount ? runoffLiters / validCount : 1;
+      for (let i = 0; i < grid.size; i += 1) if (grid.valid[i]) water[i] = baseVolume;
+    } else {
+      baseVolume = entryCoordinates.length ? runoffLiters / entryCoordinates.length : 1;
+      entryCoordinates.forEach(function (coordinate) {
+        const index = coordinateToHydrologyIndex(coordinate, grid);
+        if (!grid.valid[index]) return;
+        water[index] += baseVolume;
+        sourceIndices.push(index);
+      });
+      sourceIndices.forEach(function (source) {
+        const path = [];
+        let index = source; let guard = 0;
+        while (index >= 0 && guard < grid.size) { path.push(index); index = grid.parent[index]; guard += 1; }
+        path.forEach(function (pathIndex, position) { arrivals[pathIndex] = Math.min(arrivals[pathIndex], position / Math.max(1, path.length - 1) * .82); });
+      });
+    }
+    for (let position = grid.order.length - 1; position >= 0; position -= 1) {
+      const index = grid.order[position];
+      const downstream = grid.parent[index];
+      if (downstream >= 0) water[downstream] += water[index];
+    }
+    let maxVolume = baseVolume;
+    let maxPoolDepth = 0;
+    const baseDepth = baseVolume / grid.cellArea / 1000;
+    for (let i = 0; i < grid.size; i += 1) {
+      maxVolume = Math.max(maxVolume, water[i]);
+      if (grid.valid[i]) {
+        const ratio = water[i] / baseVolume;
+        const capacity = grid.filled[i] - grid.elevation[i];
+        if (capacity > .03 && (mode === 'irrigation' || ratio >= 12)) maxPoolDepth = Math.max(maxPoolDepth, Math.min(capacity, baseDepth * Math.sqrt(ratio)));
+      }
+    }
+    return { mode: mode, totalMinutes: totalMinutes, grid: grid, water: water, arrivals: arrivals, baseVolume: baseVolume, baseDepth: baseDepth, maxVolume: maxVolume, maxPoolDepth: maxPoolDepth };
+  }
+
+  function renderWaterTimeline(progress) {
+    if (!waterSimulationState) return;
+    const state = waterSimulationState;
+    const grid = state.grid;
+    waterSurfaceCanvas.width = grid.width;
+    waterSurfaceCanvas.height = grid.height;
+    const context = waterSurfaceCanvas.getContext('2d');
+    const image = context.createImageData(grid.width, grid.height);
+    const maxRatio = Math.max(1, state.maxVolume / state.baseVolume);
+    for (let i = 0; i < grid.size; i += 1) {
+      if (!grid.valid[i] || !state.water[i]) continue;
+      const arrival = state.arrivals[i];
+      if (!Number.isFinite(arrival) || progress <= arrival) continue;
+      const localProgress = Math.min(1, (progress - arrival) / Math.max(.001, 1 - arrival));
+      const ratio = state.water[i] / state.baseVolume;
+      const strength = Math.log1p(ratio) / Math.log1p(maxRatio);
+      const poolCapacity = Math.max(0, grid.filled[i] - grid.elevation[i]);
+      const poolDepth = Math.min(poolCapacity, state.baseDepth * Math.sqrt(ratio) * localProgress);
+      const offset = i * 4;
+      if (poolCapacity > .03 && poolDepth > .015 && (state.mode === 'irrigation' || ratio >= 12)) {
+        const depthStrength = Math.min(1, poolDepth / Math.max(.03, state.maxPoolDepth));
+        image.data[offset] = 5;
+        image.data[offset + 1] = 45 + Math.round(50 * (1 - depthStrength));
+        image.data[offset + 2] = 220;
+        image.data[offset + 3] = Math.round(125 + 125 * depthStrength * Math.sqrt(localProgress));
+      } else if ((state.mode === 'rain' && ratio >= 6) || state.mode === 'irrigation') {
+        image.data[offset] = 0;
+        image.data[offset + 1] = 155 + Math.round(60 * strength);
+        image.data[offset + 2] = 255;
+        image.data[offset + 3] = Math.round((55 + 190 * strength) * Math.sqrt(localProgress));
+      }
+    }
+    context.putImageData(image, 0, 0);
+    if (waterPreviousTerrainOpacity === null) waterPreviousTerrainOpacity = elevationLayer.getOpacity();
+    elevationLayer.setOpacity(.58);
+    waterSurfaceLayer.setVisible(true);
+    waterSurfaceSource.changed();
+    const elapsed = state.totalMinutes * progress;
+    document.getElementById('water-time-label').textContent = elapsed >= 60 ? Math.floor(elapsed / 60) + 'h ' + Math.round(elapsed % 60) + 'm' : Math.round(elapsed) + ' min';
+  }
+
+  function stopWaterAnimation() {
+    if (waterAnimationFrame) cancelAnimationFrame(waterAnimationFrame);
+    waterAnimationFrame = null;
+    document.getElementById('water-play').textContent = '▶';
+    document.getElementById('water-play').setAttribute('aria-label', 'Play water simulation');
+  }
+
+  function setWaterTimeline(progress) {
+    progress = Math.max(0, Math.min(1, progress));
+    document.getElementById('water-time').value = Math.round(progress * 100);
+    renderWaterTimeline(progress);
+  }
+
+  function playWaterTimeline() {
+    if (!waterSimulationState) return;
+    if (waterAnimationFrame) { stopWaterAnimation(); return; }
+    let startProgress = Number(document.getElementById('water-time').value) / 100;
+    if (startProgress >= .995) { startProgress = 0; setWaterTimeline(0); }
+    const startTime = performance.now();
+    const duration = 9000 * (1 - startProgress);
+    let lastRender = 0;
+    document.getElementById('water-play').textContent = 'Ⅱ';
+    document.getElementById('water-play').setAttribute('aria-label', 'Pause water simulation');
+    function frame(now) {
+      const progress = Math.min(1, startProgress + (now - startTime) / duration * (1 - startProgress));
+      if (now - lastRender > 65 || progress === 1) { setWaterTimeline(progress); lastRender = now; }
+      if (progress < 1) waterAnimationFrame = requestAnimationFrame(frame);
+      else stopWaterAnimation();
+    }
+    waterAnimationFrame = requestAnimationFrame(frame);
+  }
+
+  function clearWaterSurface() {
+    stopWaterAnimation();
+    waterSimulationState = null;
+    waterSurfaceCanvas.width = 0; waterSurfaceCanvas.height = 0;
+    waterSurfaceLayer.setVisible(false);
+    if (waterPreviousTerrainOpacity !== null) elevationLayer.setOpacity(waterPreviousTerrainOpacity);
+    waterPreviousTerrainOpacity = null;
+    waterSurfaceSource.changed();
+    document.getElementById('water-timeline').hidden = true;
   }
 
   function addWettingArea(coordinate, retainedLiters) {
@@ -593,30 +803,6 @@
     return liters >= 1000 ? (liters / 1000).toFixed(2) + ' m³' : Math.round(liters).toLocaleString() + ' L';
   }
 
-  function rainSeedCoordinates() {
-    const seeds = [];
-    for (let row = 1; row <= 5; row += 1) {
-      for (let column = 1; column <= 6; column += 1) {
-        let x = Math.round(column / 7 * elevationPixels.width);
-        let y = Math.round(row / 6 * elevationPixels.height);
-        if (elevationAtPixel(x, y) === null) {
-          let found = null;
-          for (let radius = 16; radius <= 160 && !found; radius += 16) {
-            for (let angle = 0; angle < 8; angle += 1) {
-              const nx = x + Math.round(Math.cos(angle * Math.PI / 4) * radius);
-              const ny = y + Math.round(Math.sin(angle * Math.PI / 4) * radius);
-              if (elevationAtPixel(nx, ny) !== null) { found = [nx, ny]; break; }
-            }
-          }
-          if (!found) continue;
-          x = found[0]; y = found[1];
-        }
-        seeds.push(elevationPixelToCoordinate(x, y));
-      }
-    }
-    return seeds;
-  }
-
   function showSizingResults(zoneArea, designFlow, hydraulicFlow, pipe, demandLitersDay) {
     const recommended = recommendedPipe(hydraulicFlow);
     const pressureHead = numberValue('water-pressure', 2.5) * 10.197;
@@ -646,15 +832,20 @@
     const applied = entries.length * flowPerEntry * duration;
     const infiltrated = applied * retention;
     const runoff = applied - infiltrated;
-    let totalLength = 0; let greatestDrop = 0;
     waterResultSource.clear();
+    clearWaterSurface();
+    const entryCoordinates = [];
     entries.forEach(function (feature) {
       const coordinate = feature.getGeometry().getCoordinates();
-      const trace = traceWater(coordinate);
-      addWaterTrace(trace);
       addWettingArea(coordinate, entries.length ? infiltrated / entries.length : 0);
-      if (trace) { totalLength += trace.length; greatestDrop = Math.max(greatestDrop, trace.drop); }
+      entryCoordinates.push(coordinate);
     });
+    if (entryCoordinates.length) {
+      waterSimulationState = createHydrologyState('irrigation', duration, runoff, entryCoordinates);
+      document.getElementById('water-timeline').hidden = false;
+      setWaterTimeline(0);
+      playWaterTimeline();
+    }
     const drawnArea = totalZoneArea();
     const zoneArea = drawnArea || surveyAreaSquareMeters;
     const dailyDemand = zoneArea * numberValue('water-depth', 5);
@@ -664,11 +855,11 @@
     document.getElementById('water-applied').textContent = formatVolume(applied) + ' per run';
     document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(retention * 100) + '%)';
     document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round((1 - retention) * 100) + '%)';
-    document.getElementById('water-path').textContent = entries.length ? totalLength.toFixed(1) + ' m total · up to ' + greatestDrop.toFixed(2) + ' m drop' : 'Add entry points for terrain paths';
+    document.getElementById('water-path').textContent = entries.length ? 'Connected runoff network · pooling up to ' + (waterSimulationState.maxPoolDepth * 100).toFixed(1) + ' cm' : 'Add entry points for terrain paths';
     showSizingResults(zoneArea, designFlow, hydraulicFlow, pipe, dailyDemand);
     document.getElementById('water-results').hidden = false;
     document.getElementById('water-legend').hidden = entries.length === 0;
-    document.getElementById('water-status').textContent = entries.length ? 'Blue paths and POOL markers show terrain runoff · ' + (drawnArea ? drawnArea.toFixed(0) + ' m² drawn zone.' : 'using 9,262 m² survey area.') : 'Sizing calculated. Add at least one water entry to display terrain flow.';
+    document.getElementById('water-status').textContent = entries.length ? 'Bright blue shows runoff; dark blue shows buildup · ' + (drawnArea ? drawnArea.toFixed(0) + ' m² drawn zone.' : 'using 9,262 m² survey area.') : 'Sizing calculated. Add at least one water entry to display terrain flow.';
   }
 
   function runRainSimulation() {
@@ -679,21 +870,20 @@
     const applied = surveyAreaSquareMeters * intensity * duration / 60;
     const infiltrated = applied * retention;
     const runoff = applied - infiltrated;
-    let totalLength = 0; let greatestDrop = 0; let traceCount = 0;
     waterResultSource.clear();
-    rainSeedCoordinates().forEach(function (coordinate) {
-      const trace = traceWater(coordinate);
-      addWaterTrace(trace);
-      if (trace) { totalLength += trace.length; greatestDrop = Math.max(greatestDrop, trace.drop); traceCount += 1; }
-    });
+    clearWaterSurface();
+    waterSimulationState = createHydrologyState('rain', duration, runoff, []);
+    document.getElementById('water-timeline').hidden = false;
+    setWaterTimeline(0);
+    playWaterTimeline();
     document.getElementById('water-applied').textContent = formatVolume(applied) + ' over survey';
     document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(retention * 100) + '%)';
     document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round((1 - retention) * 100) + '%)';
-    document.getElementById('water-path').textContent = traceCount + ' representative paths · up to ' + greatestDrop.toFixed(2) + ' m drop';
+    document.getElementById('water-path').textContent = 'Connected runoff network · pooling up to ' + (waterSimulationState.maxPoolDepth * 100).toFixed(1) + ' cm';
     ['water-pipe-result-row', 'water-demand-row', 'water-pump-row', 'water-solar-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
     document.getElementById('water-results').hidden = false;
     document.getElementById('water-legend').hidden = false;
-    document.getElementById('water-status').textContent = 'Blue paths and POOL markers show ' + intensity + ' mm/h rain for ' + duration + ' min · representative DTM runoff.';
+    document.getElementById('water-status').textContent = 'Bright blue shows runoff; dark blue shows buildup for ' + intensity + ' mm/h rain over ' + duration + ' min.';
   }
 
   function simulateWater() {
@@ -727,6 +917,7 @@
     stopWaterTools();
     const rain = document.getElementById('water-mode').value === 'rain';
     waterResultSource.clear();
+    clearWaterSurface();
     document.getElementById('water-results').hidden = true;
     document.getElementById('water-legend').hidden = true;
     document.getElementById('water-irrigation-fields').hidden = rain;
@@ -752,9 +943,15 @@
   document.getElementById('water-pipe').addEventListener('click', function () { startWaterDraw('pipe'); });
   document.getElementById('water-zone').addEventListener('click', function () { startWaterDraw('zone'); });
   document.getElementById('water-run').addEventListener('click', simulateWater);
+  document.getElementById('water-play').addEventListener('click', playWaterTimeline);
+  document.getElementById('water-time').addEventListener('input', function (event) {
+    stopWaterAnimation();
+    renderWaterTimeline(Number(event.target.value) / 100);
+  });
   document.getElementById('water-clear').addEventListener('click', function () {
     stopWaterTools();
     waterEntrySource.clear(); waterPipeSource.clear(); waterZoneSource.clear(); waterResultSource.clear();
+    clearWaterSurface();
     document.getElementById('water-legend').hidden = true;
     document.getElementById('water-results').hidden = true;
     document.getElementById('water-status').textContent = 'Plan cleared. Add entry points and pipe routes, or choose rainfall.';
@@ -925,6 +1122,7 @@
   }
   function show3d() {
     stopDrawing();
+    stopWaterAnimation();
     mapViewElement.hidden = true;
     document.querySelector('.model-view').classList.remove('map-active');
     if (window.setSurvey3dActive) window.setSurvey3dActive(true);

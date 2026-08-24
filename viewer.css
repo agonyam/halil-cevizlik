@@ -54,6 +54,11 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
 .water-key-flow { width: 24px; height: 4px; border: 2px solid #fff; border-radius: 3px; background: #087be8; }
 .water-key-pool { width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #075be8; }
 .water-key-entry { width: 10px; height: 10px; border: 2px solid #102d52; border-radius: 50%; background: #ffdc52; }
+.water-timeline { position: absolute; z-index: 6; top: 101px; left: 12px; display: grid; grid-template-columns: 34px minmax(180px, 330px) 72px; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,.45); border-radius: 4px; background: rgba(18,42,55,.92); padding: 6px 8px; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.water-timeline[hidden] { display: none; }
+.water-timeline button { height: 28px; border: 1px solid #b8e7f5; border-radius: 3px; background: #147da5; color: #fff; cursor: pointer; }
+.water-timeline input { width: 100%; accent-color: #1bbcf0; }
+.water-timeline output { font: 11px monospace; text-align: right; }
 .elevation-controls { margin-top: 8px; }
 .elevation-histogram-wrap { position: relative; margin: 8px 0 0; padding: 4px 0 17px; background: #eef2f2; }
 #elevation-histogram { display: block; width: 100%; height: 104px; cursor: ew-resize; touch-action: none; }
@@ -136,6 +141,7 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
   .map-sidebar h2 { margin-inline: -9px; padding-inline: 9px; }
   .irrigation-fields > label, #water-irrigation-fields label, #water-rain-fields label { grid-template-columns: 1fr; gap: 2px; }
   .water-legend { top: 94px; left: 7px; right: 7px; gap: 7px; overflow-x: auto; white-space: nowrap; }
+  .water-timeline { top: 139px; right: 7px; left: 7px; grid-template-columns: 32px 1fr 62px; }
   .map-quick-layers { left: 6px; right: 6px; overflow-x: auto; }
   .map-quick-layers button { white-space: nowrap; }
   #map-coordinates { left: 8px; bottom: 56px; max-width: calc(100% - 16px); font-size: 10px; }
