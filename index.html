@@ -34,10 +34,38 @@
         <label><input type="checkbox" data-map-layer="orthophoto" checked> Orthophoto</label>
         <label><input type="checkbox" data-map-layer="dtm"> Terrain model (DTM)</label>
         <label><input type="checkbox" data-map-layer="dsm"> Surface model (DSM)</label>
-        <label><input type="checkbox" data-map-layer="hillshade"> Hillshade</label>
         <label><input type="checkbox" data-map-layer="contours"> 1 m contours</label>
         <label><input type="checkbox" data-map-layer="satellite" checked> Satellite base map</label>
         <label><input type="checkbox" data-map-layer="osm"> Street map</label>
+        <section id="elevation-controls" class="elevation-controls" hidden>
+          <h2 id="elevation-title">Terrain Model</h2>
+          <div class="elevation-histogram-wrap">
+            <canvas id="elevation-histogram" width="272" height="104" aria-label="Elevation histogram with adjustable display range"></canvas>
+            <div class="elevation-bounds"><span id="elevation-global-min">—</span><span id="elevation-global-max">—</span></div>
+          </div>
+          <div class="elevation-range-fields">
+            <label>Min <input id="elevation-min" type="number" step="0.001"></label>
+            <label>Max <input id="elevation-max" type="number" step="0.001"></label>
+          </div>
+          <label class="elevation-select">Color
+            <select id="elevation-color">
+              <option value="viridis">Viridis</option>
+              <option value="jet">Jet</option>
+              <option value="terrain">Terrain</option>
+              <option value="earth">Earth</option>
+              <option value="pastel">Pastel</option>
+            </select>
+          </label>
+          <label class="elevation-select">Shading
+            <select id="elevation-shading">
+              <option value="normal">Normal</option>
+              <option value="extruded">Extruded</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <p class="elevation-crs"><strong>CRS</strong> WGS 84 / UTM zone 35N (EPSG:32635)</p>
+          <p id="elevation-status" class="elevation-status" aria-live="polite"></p>
+        </section>
         <h2>Layer opacity</h2>
         <input id="map-opacity" aria-label="Survey layer opacity" type="range" min="0" max="1" step="0.05" value="1">
         <h2>Measurement</h2>
@@ -55,7 +83,6 @@
           <button id="map-location" type="button">⌖ Location</button>
           <button id="map-fullscreen" type="button">⛶ Fullscreen</button>
         </div>
-        <div class="map-legend"><span>278 m</span><i></i><span>304 m</span></div>
       </aside>
       <div id="map-coordinates" aria-live="polite"></div>
       <div class="map-bottom-actions">
