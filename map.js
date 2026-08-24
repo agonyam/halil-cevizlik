@@ -79,6 +79,10 @@
   const camerasSource = new ol.source.Vector();
   const contoursSource = new ol.source.Vector();
   const importedSource = new ol.source.Vector();
+  const waterEntrySource = new ol.source.Vector();
+  const waterPipeSource = new ol.source.Vector();
+  const waterZoneSource = new ol.source.Vector();
+  const waterResultSource = new ol.source.Vector();
   const sketchLayer = new ol.layer.Vector({
     source: sketchSource,
     style: new ol.style.Style({
@@ -112,10 +116,36 @@
     source: importedSource,
     style: new ol.style.Style({ fill: new ol.style.Fill({ color: 'rgba(255, 100, 25, .2)' }), stroke: new ol.style.Stroke({ color: '#ff6419', width: 3 }), image: new ol.style.Circle({ radius: 5, fill: new ol.style.Fill({ color: '#ff6419' }) }) })
   });
+  const waterResultLayer = new ol.layer.Vector({
+    source: waterResultSource,
+    style: function (feature) {
+      const type = feature.get('waterType');
+      if (type === 'wetting') return new ol.style.Style({ fill: new ol.style.Fill({ color: 'rgba(30, 174, 229, .18)' }), stroke: new ol.style.Stroke({ color: 'rgba(65, 200, 245, .8)', width: 2 }) });
+      if (type === 'pool') return new ol.style.Style({ image: new ol.style.Circle({ radius: 8, fill: new ol.style.Fill({ color: 'rgba(10, 105, 210, .72)' }), stroke: new ol.style.Stroke({ color: '#b9ecff', width: 2 }) }) });
+      return new ol.style.Style({ stroke: new ol.style.Stroke({ color: 'rgba(30, 170, 235, .9)', width: 4 }) });
+    }
+  });
+  const waterPipeLayer = new ol.layer.Vector({
+    source: waterPipeSource,
+    style: new ol.style.Style({ stroke: new ol.style.Stroke({ color: '#173d79', width: 6 }), image: new ol.style.Circle({ radius: 4, fill: new ol.style.Fill({ color: '#77c9f2' }), stroke: new ol.style.Stroke({ color: '#173d79', width: 2 }) }) })
+  });
+  const waterZoneLayer = new ol.layer.Vector({
+    source: waterZoneSource,
+    style: new ol.style.Style({ fill: new ol.style.Fill({ color: 'rgba(38, 191, 122, .13)' }), stroke: new ol.style.Stroke({ color: '#28bf7b', width: 3 }) })
+  });
+  const waterEntryLayer = new ol.layer.Vector({
+    source: waterEntrySource,
+    style: function (feature) {
+      return new ol.style.Style({
+        image: new ol.style.Circle({ radius: 8, fill: new ol.style.Fill({ color: '#18bce7' }), stroke: new ol.style.Stroke({ color: '#fff', width: 3 }) }),
+        text: new ol.style.Text({ text: String(feature.get('entryNumber') || ''), offsetY: -17, font: 'bold 11px Arial', fill: new ol.style.Fill({ color: '#fff' }), stroke: new ol.style.Stroke({ color: '#173d79', width: 3 }) })
+      });
+    }
+  });
 
   const map = new ol.Map({
     target: 'map',
-    layers: [layers.satellite, layers.osm, layers.orthophoto, layers['plant-health'], elevationLayer, layers.contours, layers.cameras, importedLayer, sketchLayer, locationLayer],
+    layers: [layers.satellite, layers.osm, layers.orthophoto, layers['plant-health'], elevationLayer, layers.contours, layers.cameras, importedLayer, sketchLayer, waterZoneLayer, waterResultLayer, waterPipeLayer, waterEntryLayer, locationLayer],
     controls: ol.control.defaults().extend([new ol.control.ScaleLine()]),
     view: new ol.View({ center: ol.extent.getCenter(surveyExtent), zoom: 19, minZoom: 14, maxZoom: 23 })
   });
@@ -289,13 +319,18 @@
   }
 
   function loadElevation(name) {
+    if (elevationActive === name && elevationPixels && elevationMetadata) {
+      elevationLayer.setVisible(true);
+      elevationControls.hidden = false;
+      return Promise.resolve(true);
+    }
     const token = ++elevationLoadToken;
     elevationActive = name;
     elevationLayer.setVisible(true);
     elevationControls.hidden = false;
     document.getElementById('elevation-title').textContent = name === 'dtm' ? 'Terrain Model' : 'Surface Model';
     elevationStatus.textContent = 'Loading full-resolution elevation…';
-    fetch('./assets/map/elevation.json').then(function (response) { return response.json(); }).then(function (metadata) {
+    return fetch('./assets/map/elevation.json').then(function (response) { return response.json(); }).then(function (metadata) {
       elevationMetadata = metadata;
       updateRangeUi();
       return loadPixels('./assets/map/' + name + '-elevation.png');
@@ -310,11 +345,14 @@
         if (token !== elevationLoadToken) return;
         hillshadePixels = shade;
         renderElevation();
+        return true;
       }).catch(function () {
         if (token === elevationLoadToken) elevationStatus.textContent = 'Color elevation ready · relief unavailable';
+        return true;
       });
     }).catch(function () {
       if (token === elevationLoadToken) elevationStatus.textContent = 'Elevation layer could not be loaded.';
+      return false;
     });
   }
 
@@ -335,6 +373,8 @@
   }
 
   let draw = null;
+  let waterDraw = null;
+  let waterTool = null;
   const resultOverlays = [];
 
   function toUtm(coordinate) {
@@ -342,21 +382,30 @@
   }
 
   function formatDistance(coordinates) {
+    const distance = distanceMeters(coordinates);
+    return distance >= 1000 ? (distance / 1000).toFixed(2) + ' km' : distance.toFixed(2) + ' m';
+  }
+
+  function distanceMeters(coordinates) {
     let distance = 0;
     for (let i = 1; i < coordinates.length; i += 1) {
       const a = toUtm(coordinates[i - 1]);
       const b = toUtm(coordinates[i]);
       distance += Math.hypot(b[0] - a[0], b[1] - a[1]);
     }
-    return distance >= 1000 ? (distance / 1000).toFixed(2) + ' km' : distance.toFixed(2) + ' m';
+    return distance;
   }
 
   function formatArea(coordinates) {
+    const area = areaSquareMeters(coordinates);
+    return area >= 10000 ? (area / 10000).toFixed(3) + ' ha' : area.toFixed(2) + ' m²';
+  }
+
+  function areaSquareMeters(coordinates) {
     const ring = coordinates[0].map(toUtm);
     let area = 0;
     for (let i = 0; i < ring.length - 1; i += 1) area += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
-    area = Math.abs(area / 2);
-    return area >= 10000 ? (area / 10000).toFixed(3) + ' ha' : area.toFixed(2) + ' m²';
+    return Math.abs(area / 2);
   }
 
   function addLabel(position, text, className) {
@@ -375,6 +424,7 @@
   }
 
   function startDrawing(tool, button) {
+    stopWaterTools();
     stopDrawing();
     if (tool === 'clear') {
       sketchSource.clear();
@@ -395,6 +445,316 @@
       }
     });
   }
+
+  const surveyAreaSquareMeters = 9262;
+  const soilRetention = { sandy: .78, loam: .58, clay: .32, saturated: .12 };
+
+  function numberValue(id, fallback) {
+    const value = Number(document.getElementById(id).value);
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+  }
+
+  function stopWaterTools() {
+    waterTool = null;
+    if (waterDraw) map.removeInteraction(waterDraw);
+    waterDraw = null;
+    ['water-place', 'water-pipe', 'water-zone'].forEach(function (id) { document.getElementById(id).classList.remove('active'); });
+    map.getTargetElement().style.cursor = '';
+  }
+
+  function ensureDtm() {
+    document.querySelector('[data-map-layer="dtm"]').checked = true;
+    document.querySelector('[data-map-layer="dsm"]').checked = false;
+    return loadElevation('dtm').then(function () {
+      refreshQuickButtons();
+      return elevationActive === 'dtm' && elevationPixels && elevationMetadata;
+    });
+  }
+
+  function coordinateToElevationPixel(coordinate) {
+    if (!elevationPixels) return null;
+    const x = Math.round((coordinate[0] - surveyExtent[0]) / (surveyExtent[2] - surveyExtent[0]) * (elevationPixels.width - 1));
+    const y = Math.round((surveyExtent[3] - coordinate[1]) / (surveyExtent[3] - surveyExtent[1]) * (elevationPixels.height - 1));
+    if (x < 0 || y < 0 || x >= elevationPixels.width || y >= elevationPixels.height) return null;
+    return [x, y];
+  }
+
+  function elevationPixelToCoordinate(x, y) {
+    return [
+      surveyExtent[0] + x / (elevationPixels.width - 1) * (surveyExtent[2] - surveyExtent[0]),
+      surveyExtent[3] - y / (elevationPixels.height - 1) * (surveyExtent[3] - surveyExtent[1])
+    ];
+  }
+
+  function elevationAtPixel(x, y) {
+    x = Math.round(x); y = Math.round(y);
+    if (!elevationPixels || x < 0 || y < 0 || x >= elevationPixels.width || y >= elevationPixels.height) return null;
+    const index = (y * elevationPixels.width + x) * 4;
+    if (!elevationPixels.pixels[index + 3]) return null;
+    const meta = elevationMetadata.dtm;
+    return meta.offset + (elevationPixels.pixels[index] * 256 + elevationPixels.pixels[index + 1]) * meta.scale;
+  }
+
+  function elevationAtCoordinate(coordinate) {
+    const pixel = coordinateToElevationPixel(coordinate);
+    return pixel ? elevationAtPixel(pixel[0], pixel[1]) : null;
+  }
+
+  function traceWater(coordinate) {
+    const start = coordinateToElevationPixel(coordinate);
+    if (!start || elevationAtPixel(start[0], start[1]) === null) return null;
+    let x = start[0]; let y = start[1];
+    let current = elevationAtPixel(x, y);
+    const startElevation = current;
+    const coordinates = [elevationPixelToCoordinate(x, y)];
+    const visited = {};
+    const directions = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+    for (let stepIndex = 0; stepIndex < 520; stepIndex += 1) {
+      const key = Math.round(x / 4) + ':' + Math.round(y / 4);
+      if (visited[key]) break;
+      visited[key] = true;
+      let best = null;
+      [8, 16, 28, 44].some(function (radius) {
+        directions.forEach(function (direction) {
+          const nx = x + direction[0] * radius;
+          const ny = y + direction[1] * radius;
+          const z = elevationAtPixel(nx, ny);
+          if (z !== null && z < current - .004 && (!best || z < best.z)) best = { x: nx, y: ny, z: z };
+        });
+        return Boolean(best);
+      });
+      if (!best) break;
+      x = best.x; y = best.y; current = best.z;
+      coordinates.push(elevationPixelToCoordinate(x, y));
+      if (x < 10 || y < 10 || x > elevationPixels.width - 11 || y > elevationPixels.height - 11) break;
+    }
+    return { coordinates: coordinates, drop: Math.max(0, startElevation - current), end: coordinates[coordinates.length - 1], length: distanceMeters(coordinates) };
+  }
+
+  function addWaterTrace(trace) {
+    if (!trace || trace.coordinates.length < 2) return;
+    const line = new ol.Feature(new ol.geom.LineString(trace.coordinates));
+    line.set('waterType', 'flow');
+    waterResultSource.addFeature(line);
+    const pool = new ol.Feature(new ol.geom.Point(trace.end));
+    pool.set('waterType', 'pool');
+    waterResultSource.addFeature(pool);
+  }
+
+  function addWettingArea(coordinate, retainedLiters) {
+    const targetDepth = numberValue('water-depth', 5);
+    const radiusMeters = Math.max(1, Math.min(35, Math.sqrt(Math.max(1, retainedLiters / targetDepth) / Math.PI)));
+    const latitude = ol.proj.toLonLat(coordinate)[1] * Math.PI / 180;
+    const feature = new ol.Feature(new ol.geom.Circle(coordinate, radiusMeters / Math.cos(latitude)));
+    feature.set('waterType', 'wetting');
+    waterResultSource.addFeature(feature);
+  }
+
+  function totalZoneArea() {
+    let area = 0;
+    waterZoneSource.getFeatures().forEach(function (feature) { area += areaSquareMeters(feature.getGeometry().getCoordinates()); });
+    return area;
+  }
+
+  function pipeMetrics(flowLitersMinute, diameterMm) {
+    let length = 0; let terrainLift = 0;
+    waterPipeSource.getFeatures().forEach(function (feature) {
+      const coordinates = feature.getGeometry().getCoordinates();
+      length += distanceMeters(coordinates);
+      const startElevation = elevationAtCoordinate(coordinates[0]);
+      if (startElevation === null) return;
+      coordinates.forEach(function (coordinate) {
+        const elevation = elevationAtCoordinate(coordinate);
+        if (elevation !== null) terrainLift = Math.max(terrainLift, elevation - startElevation);
+      });
+    });
+    const q = flowLitersMinute / 60000;
+    const diameter = diameterMm / 1000;
+    const velocity = diameter > 0 ? q / (Math.PI * diameter * diameter / 4) : 0;
+    const loss = length && q && diameter ? 10.67 * length * Math.pow(q, 1.852) / (Math.pow(140, 1.852) * Math.pow(diameter, 4.87)) : 0;
+    return { length: length, lift: terrainLift, loss: loss, velocity: velocity };
+  }
+
+  function recommendedPipe(flowLitersMinute) {
+    const standards = [16, 20, 25, 32, 40, 50, 63, 75, 90, 110, 125, 160];
+    const q = flowLitersMinute / 60000;
+    const minimum = Math.sqrt(4 * q / (Math.PI * 1.2)) * 1000;
+    for (let i = 0; i < standards.length; i += 1) if (standards[i] >= minimum) return standards[i];
+    return standards[standards.length - 1];
+  }
+
+  function formatVolume(liters) {
+    return liters >= 1000 ? (liters / 1000).toFixed(2) + ' m³' : Math.round(liters).toLocaleString() + ' L';
+  }
+
+  function rainSeedCoordinates() {
+    const seeds = [];
+    for (let row = 1; row <= 5; row += 1) {
+      for (let column = 1; column <= 6; column += 1) {
+        let x = Math.round(column / 7 * elevationPixels.width);
+        let y = Math.round(row / 6 * elevationPixels.height);
+        if (elevationAtPixel(x, y) === null) {
+          let found = null;
+          for (let radius = 16; radius <= 160 && !found; radius += 16) {
+            for (let angle = 0; angle < 8; angle += 1) {
+              const nx = x + Math.round(Math.cos(angle * Math.PI / 4) * radius);
+              const ny = y + Math.round(Math.sin(angle * Math.PI / 4) * radius);
+              if (elevationAtPixel(nx, ny) !== null) { found = [nx, ny]; break; }
+            }
+          }
+          if (!found) continue;
+          x = found[0]; y = found[1];
+        }
+        seeds.push(elevationPixelToCoordinate(x, y));
+      }
+    }
+    return seeds;
+  }
+
+  function showSizingResults(zoneArea, designFlow, hydraulicFlow, pipe, demandLitersDay) {
+    const recommended = recommendedPipe(hydraulicFlow);
+    const pressureHead = numberValue('water-pressure', 2.5) * 10.197;
+    const totalHead = pressureHead + numberValue('water-source-lift', 0) + pipe.lift + pipe.loss;
+    const efficiency = numberValue('pump-efficiency', 65) / 100;
+    const pumpKw = hydraulicFlow > 0 ? (1000 * 9.81 * (hydraulicFlow / 60000) * totalHead / efficiency) / 1000 : 0;
+    const operatingHours = numberValue('water-hours', 6);
+    const solarHours = numberValue('solar-hours', 5);
+    const solarKwp = pumpKw * operatingHours / (solarHours * .75);
+    const panelCount = Math.ceil(solarKwp / .55);
+    document.getElementById('water-demand').textContent = formatVolume(demandLitersDay) + '/day · ' + Math.round(designFlow * 60).toLocaleString() + ' L/h (' + designFlow.toFixed(1) + ' L/min)';
+    document.getElementById('water-pipe-result').textContent = pipe.length.toFixed(1) + ' m drawn · test ' + numberValue('water-diameter', 25) + ' mm: ' + pipe.loss.toFixed(1) + ' m loss, ' + pipe.velocity.toFixed(1) + ' m/s · suggested ≥ ' + recommended + ' mm';
+    document.getElementById('water-pump').textContent = pumpKw.toFixed(2) + ' kW / ' + (pumpKw * 1.341).toFixed(2) + ' hp · ' + totalHead.toFixed(1) + ' m head';
+    document.getElementById('water-solar').textContent = solarKwp.toFixed(2) + ' kWp · about ' + panelCount + ' × 550 W panels';
+    document.getElementById('water-demand-row').hidden = false;
+    document.getElementById('water-pump-row').hidden = false;
+    document.getElementById('water-solar-row').hidden = false;
+    document.getElementById('water-pipe-result-row').hidden = false;
+    return zoneArea;
+  }
+
+  function runIrrigationSimulation() {
+    const entries = waterEntrySource.getFeatures();
+    const flowPerEntry = numberValue('water-flow', 8);
+    const duration = numberValue('water-duration', 20);
+    const retention = soilRetention[document.getElementById('water-soil').value] || soilRetention.loam;
+    const applied = entries.length * flowPerEntry * duration;
+    const infiltrated = applied * retention;
+    const runoff = applied - infiltrated;
+    let totalLength = 0; let greatestDrop = 0;
+    waterResultSource.clear();
+    entries.forEach(function (feature) {
+      const coordinate = feature.getGeometry().getCoordinates();
+      const trace = traceWater(coordinate);
+      addWaterTrace(trace);
+      addWettingArea(coordinate, entries.length ? infiltrated / entries.length : 0);
+      if (trace) { totalLength += trace.length; greatestDrop = Math.max(greatestDrop, trace.drop); }
+    });
+    const drawnArea = totalZoneArea();
+    const zoneArea = drawnArea || surveyAreaSquareMeters;
+    const dailyDemand = zoneArea * numberValue('water-depth', 5);
+    const designFlow = dailyDemand / (numberValue('water-hours', 6) * 60);
+    const hydraulicFlow = Math.max(designFlow, entries.length * flowPerEntry);
+    const pipe = pipeMetrics(hydraulicFlow, numberValue('water-diameter', 25));
+    document.getElementById('water-applied').textContent = formatVolume(applied) + ' per run';
+    document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(retention * 100) + '%)';
+    document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round((1 - retention) * 100) + '%)';
+    document.getElementById('water-path').textContent = entries.length ? totalLength.toFixed(1) + ' m total · up to ' + greatestDrop.toFixed(2) + ' m drop' : 'Add entry points for terrain paths';
+    showSizingResults(zoneArea, designFlow, hydraulicFlow, pipe, dailyDemand);
+    document.getElementById('water-results').hidden = false;
+    document.getElementById('water-status').textContent = (drawnArea ? drawnArea.toFixed(0) + ' m² drawn zone' : 'Using 9,262 m² survey area') + ' · preliminary sizing, verify before equipment purchase.';
+  }
+
+  function runRainSimulation() {
+    const intensity = numberValue('rain-intensity', 25);
+    const duration = numberValue('rain-duration', 60);
+    const baseRetention = soilRetention[document.getElementById('water-soil').value] || soilRetention.loam;
+    const retention = Math.max(.05, baseRetention - Math.max(0, intensity - 15) * .006);
+    const applied = surveyAreaSquareMeters * intensity * duration / 60;
+    const infiltrated = applied * retention;
+    const runoff = applied - infiltrated;
+    let totalLength = 0; let greatestDrop = 0; let traceCount = 0;
+    waterResultSource.clear();
+    rainSeedCoordinates().forEach(function (coordinate) {
+      const trace = traceWater(coordinate);
+      addWaterTrace(trace);
+      if (trace) { totalLength += trace.length; greatestDrop = Math.max(greatestDrop, trace.drop); traceCount += 1; }
+    });
+    document.getElementById('water-applied').textContent = formatVolume(applied) + ' over survey';
+    document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(retention * 100) + '%)';
+    document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round((1 - retention) * 100) + '%)';
+    document.getElementById('water-path').textContent = traceCount + ' representative paths · up to ' + greatestDrop.toFixed(2) + ' m drop';
+    ['water-pipe-result-row', 'water-demand-row', 'water-pump-row', 'water-solar-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
+    document.getElementById('water-results').hidden = false;
+    document.getElementById('water-status').textContent = intensity + ' mm/h for ' + duration + ' min · representative DTM runoff, not a flood-depth model.';
+  }
+
+  function simulateWater() {
+    stopDrawing(); stopWaterTools();
+    const status = document.getElementById('water-status');
+    status.textContent = 'Loading terrain and calculating…';
+    ensureDtm().then(function (ready) {
+      if (!ready) { status.textContent = 'Terrain data could not be loaded.'; return; }
+      if (document.getElementById('water-mode').value === 'rain') runRainSimulation();
+      else runIrrigationSimulation();
+    });
+  }
+
+  function startWaterDraw(kind) {
+    stopDrawing(); stopWaterTools();
+    const isPipe = kind === 'pipe';
+    const button = document.getElementById(isPipe ? 'water-pipe' : 'water-zone');
+    button.classList.add('active');
+    waterTool = kind;
+    waterDraw = new ol.interaction.Draw({ source: isPipe ? waterPipeSource : waterZoneSource, type: isPipe ? 'LineString' : 'Polygon' });
+    map.addInteraction(waterDraw);
+    document.getElementById('water-status').textContent = isPipe ? 'Click along the pipe route; double-click to finish.' : 'Draw the watering zone; click the first point to close.';
+    waterDraw.on('drawend', function (event) {
+      event.feature.set('waterType', kind);
+      window.setTimeout(stopWaterTools, 0);
+      document.getElementById('water-status').textContent = isPipe ? 'Pipe route added. Add more or simulate.' : 'Watering zone added. Simulate to size the system.';
+    });
+  }
+
+  function updateWaterMode() {
+    stopWaterTools();
+    const rain = document.getElementById('water-mode').value === 'rain';
+    document.getElementById('water-irrigation-fields').hidden = rain;
+    document.getElementById('water-rain-fields').hidden = !rain;
+    ['water-place', 'water-pipe', 'water-zone'].forEach(function (id) { document.getElementById(id).hidden = rain; });
+    document.getElementById('water-status').textContent = rain ? 'Set the rain event and simulate terrain runoff.' : 'Add entry points and pipe routes, or draw a watering zone.';
+  }
+
+  document.getElementById('water-mode').addEventListener('change', updateWaterMode);
+  document.getElementById('water-place').addEventListener('click', function () {
+    if (waterTool === 'entry') {
+      stopWaterTools();
+      document.getElementById('water-status').textContent = waterEntrySource.getFeatures().length + ' water entr' + (waterEntrySource.getFeatures().length === 1 ? 'y' : 'ies') + ' ready.';
+      return;
+    }
+    stopDrawing(); stopWaterTools();
+    const button = document.getElementById('water-place');
+    button.classList.add('active');
+    waterTool = 'entry';
+    map.getTargetElement().style.cursor = 'crosshair';
+    document.getElementById('water-status').textContent = 'Click the map to add water entry points; click the button again to finish.';
+  });
+  document.getElementById('water-pipe').addEventListener('click', function () { startWaterDraw('pipe'); });
+  document.getElementById('water-zone').addEventListener('click', function () { startWaterDraw('zone'); });
+  document.getElementById('water-run').addEventListener('click', simulateWater);
+  document.getElementById('water-clear').addEventListener('click', function () {
+    stopWaterTools();
+    waterEntrySource.clear(); waterPipeSource.clear(); waterZoneSource.clear(); waterResultSource.clear();
+    document.getElementById('water-results').hidden = true;
+    document.getElementById('water-status').textContent = 'Plan cleared. Add entry points and pipe routes, or choose rainfall.';
+  });
+  map.on('singleclick', function (event) {
+    if (waterTool !== 'entry') return;
+    const feature = new ol.Feature(new ol.geom.Point(event.coordinate));
+    feature.set('entryNumber', waterEntrySource.getFeatures().length + 1);
+    waterEntrySource.addFeature(feature);
+    document.getElementById('water-status').textContent = waterEntrySource.getFeatures().length + ' water entr' + (waterEntrySource.getFeatures().length === 1 ? 'y' : 'ies') + ' added.';
+  });
+  updateWaterMode();
 
   function refreshQuickButtons() {
     document.querySelectorAll('[data-map-quick]').forEach(function (button) {

@@ -75,6 +75,52 @@
           <button type="button" data-map-tool="marker" title="Add annotation">● Marker</button>
           <button type="button" data-map-tool="clear" title="Clear measurements">× Clear</button>
         </div>
+        <section class="irrigation-controls" aria-labelledby="irrigation-title">
+          <h2 id="irrigation-title">Water planning <span>DTM simulation</span></h2>
+          <p class="irrigation-note">Estimate wetting, downhill runoff and pooling before defining irrigation zones. Planning preview only.</p>
+          <div class="irrigation-fields">
+            <label>Scenario <select id="water-mode"><option value="irrigation">Irrigation strategy</option><option value="rain">Rainfall event</option></select></label>
+            <label>Soil <select id="water-soil">
+              <option value="sandy">Sandy · fast absorption</option>
+              <option value="loam" selected>Loam · medium absorption</option>
+              <option value="clay">Clay · slow absorption</option>
+              <option value="saturated">Saturated · high runoff</option>
+            </select></label>
+            <div id="water-irrigation-fields">
+              <label>Flow / entry <span><input id="water-flow" type="number" min="0.5" max="250" step="0.5" value="8"> L/min</span></label>
+              <label>Duration <span><input id="water-duration" type="number" min="1" max="720" step="1" value="20"> min</span></label>
+              <label>Test pipe <span><input id="water-diameter" type="number" min="8" max="200" step="1" value="25"> mm</span></label>
+              <label>Outlet pressure <span><input id="water-pressure" type="number" min="0.1" max="10" step="0.1" value="2.5"> bar</span></label>
+              <label>Source lift <span><input id="water-source-lift" type="number" min="0" max="300" step="0.5" value="0"> m</span></label>
+              <label>Watering target <span><input id="water-depth" type="number" min="0.1" max="50" step="0.1" value="5"> mm/day</span></label>
+              <label>Operating time <span><input id="water-hours" type="number" min="0.25" max="24" step="0.25" value="6"> h/day</span></label>
+              <label>Pump efficiency <span><input id="pump-efficiency" type="number" min="20" max="95" step="1" value="65"> %</span></label>
+              <label>Peak sun <span><input id="solar-hours" type="number" min="1" max="12" step="0.1" value="5"> h/day</span></label>
+            </div>
+            <div id="water-rain-fields" hidden>
+              <label>Rain intensity <span><input id="rain-intensity" type="number" min="0.1" max="300" step="0.5" value="25"> mm/h</span></label>
+              <label>Duration <span><input id="rain-duration" type="number" min="1" max="1440" step="1" value="60"> min</span></label>
+            </div>
+          </div>
+          <div class="map-tool-grid irrigation-actions">
+            <button id="water-place" type="button">⌖ Add entry</button>
+            <button id="water-pipe" type="button">⌁ Draw pipe</button>
+            <button id="water-zone" type="button">▱ Draw zone</button>
+            <button id="water-run" type="button">▶ Simulate</button>
+            <button id="water-clear" type="button">× Clear</button>
+          </div>
+          <dl id="water-results" class="water-results" hidden>
+            <div><dt>Applied</dt><dd id="water-applied">—</dd></div>
+            <div><dt>Estimated infiltration</dt><dd id="water-infiltration">—</dd></div>
+            <div><dt>Surface runoff</dt><dd id="water-runoff">—</dd></div>
+            <div><dt>Flow path / drop</dt><dd id="water-path">—</dd></div>
+            <div id="water-pipe-result-row"><dt>Pipe plan</dt><dd id="water-pipe-result">—</dd></div>
+            <div id="water-demand-row"><dt>Zone demand</dt><dd id="water-demand">—</dd></div>
+            <div id="water-pump-row"><dt>Pump estimate</dt><dd id="water-pump">—</dd></div>
+            <div id="water-solar-row"><dt>Solar estimate</dt><dd id="water-solar">—</dd></div>
+          </dl>
+          <p id="water-status" class="water-status" aria-live="polite">Add entry points and pipe routes, or choose rainfall.</p>
+        </section>
         <h2>Overlays</h2>
         <label class="map-upload">＋ Temporary GeoJSON<input id="map-geojson" type="file" accept=".json,.geojson,application/geo+json,application/json"></label>
         <h2>Navigation</h2>

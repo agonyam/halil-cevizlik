@@ -30,6 +30,23 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
 .map-tool-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .map-tool-grid button, .mode-switch { border: 1px solid #9dabad; border-radius: 3px; background: #e7ebec; padding: 7px 8px; color: #24363b; cursor: pointer; }
 .map-tool-grid button.active { border-color: #69b4cf; background: #2e859f; color: #fff; }
+.map-tool-grid button:disabled { cursor: not-allowed; opacity: .5; }
+.irrigation-controls { margin-top: 10px; }
+.irrigation-controls h2 { display: flex; align-items: center; justify-content: space-between; }
+.irrigation-controls h2 span { border-radius: 10px; background: #1c758d; padding: 2px 7px; color: #eafaff; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.irrigation-note { margin: 7px 0 9px; color: #c6d4d7; font-size: 11px; line-height: 1.4; }
+.irrigation-fields { display: grid; gap: 5px; }
+.irrigation-fields > label, #water-irrigation-fields label, #water-rain-fields label { display: grid; grid-template-columns: 1fr 1.35fr; align-items: center; gap: 7px; }
+#water-irrigation-fields, #water-rain-fields { display: grid; gap: 5px; }
+#water-irrigation-fields[hidden], #water-rain-fields[hidden] { display: none; }
+.irrigation-fields label > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; color: #cbd6d8; font-size: 11px; }
+.irrigation-fields input, .irrigation-fields select { min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid #9dabad; border-radius: 3px; background: #f5f7f7; padding: 5px; color: #24363b; }
+.irrigation-actions { margin-top: 9px; }
+.water-results { margin: 10px 0 0; border-top: 1px solid #577077; }
+.water-results div { display: grid; grid-template-columns: 1fr 1.55fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(96,119,125,.45); font-size: 11px; }
+.water-results dt { color: #b9c9cc; }
+.water-results dd { margin: 0; color: #fff; text-align: right; line-height: 1.35; }
+.water-status { margin: 8px 0 0; color: #8fdaf0; font-size: 11px; line-height: 1.4; }
 .elevation-controls { margin-top: 8px; }
 .elevation-histogram-wrap { position: relative; margin: 8px 0 0; padding: 4px 0 17px; background: #eef2f2; }
 #elevation-histogram { display: block; width: 100%; height: 104px; cursor: ew-resize; touch-action: none; }
@@ -110,6 +127,7 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
   .model-action-buttons span { display: none; }
   .map-sidebar { top: 46px; right: 6px; width: 210px; padding-inline: 9px; }
   .map-sidebar h2 { margin-inline: -9px; padding-inline: 9px; }
+  .irrigation-fields > label, #water-irrigation-fields label, #water-rain-fields label { grid-template-columns: 1fr; gap: 2px; }
   .map-quick-layers { left: 6px; right: 6px; overflow-x: auto; }
   .map-quick-layers button { white-space: nowrap; }
   #map-coordinates { left: 8px; bottom: 56px; max-width: calc(100% - 16px); font-size: 10px; }
