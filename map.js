@@ -120,9 +120,15 @@
     source: waterResultSource,
     style: function (feature) {
       const type = feature.get('waterType');
-      if (type === 'wetting') return new ol.style.Style({ fill: new ol.style.Fill({ color: 'rgba(30, 174, 229, .18)' }), stroke: new ol.style.Stroke({ color: 'rgba(65, 200, 245, .8)', width: 2 }) });
-      if (type === 'pool') return new ol.style.Style({ image: new ol.style.Circle({ radius: 8, fill: new ol.style.Fill({ color: 'rgba(10, 105, 210, .72)' }), stroke: new ol.style.Stroke({ color: '#b9ecff', width: 2 }) }) });
-      return new ol.style.Style({ stroke: new ol.style.Stroke({ color: 'rgba(30, 170, 235, .9)', width: 4 }) });
+      if (type === 'wetting') return new ol.style.Style({ fill: new ol.style.Fill({ color: 'rgba(0, 111, 255, .3)' }), stroke: new ol.style.Stroke({ color: '#dff8ff', width: 3 }) });
+      if (type === 'pool') return new ol.style.Style({
+        image: new ol.style.Circle({ radius: 11, fill: new ol.style.Fill({ color: '#075be8' }), stroke: new ol.style.Stroke({ color: '#fff', width: 3 }) }),
+        text: new ol.style.Text({ text: 'POOL', offsetY: -20, font: 'bold 10px Arial', fill: new ol.style.Fill({ color: '#fff' }), stroke: new ol.style.Stroke({ color: '#092e5f', width: 3 }) })
+      });
+      return [
+        new ol.style.Style({ stroke: new ol.style.Stroke({ color: 'rgba(255, 255, 255, .95)', width: 8 }) }),
+        new ol.style.Style({ stroke: new ol.style.Stroke({ color: '#087be8', width: 5 }) })
+      ];
     }
   });
   const waterPipeLayer = new ol.layer.Vector({
@@ -137,15 +143,15 @@
     source: waterEntrySource,
     style: function (feature) {
       return new ol.style.Style({
-        image: new ol.style.Circle({ radius: 8, fill: new ol.style.Fill({ color: '#18bce7' }), stroke: new ol.style.Stroke({ color: '#fff', width: 3 }) }),
-        text: new ol.style.Text({ text: String(feature.get('entryNumber') || ''), offsetY: -17, font: 'bold 11px Arial', fill: new ol.style.Fill({ color: '#fff' }), stroke: new ol.style.Stroke({ color: '#173d79', width: 3 }) })
+        image: new ol.style.Circle({ radius: 10, fill: new ol.style.Fill({ color: '#ffdc52' }), stroke: new ol.style.Stroke({ color: '#102d52', width: 4 }) }),
+        text: new ol.style.Text({ text: String(feature.get('entryNumber') || ''), offsetY: -20, font: 'bold 12px Arial', fill: new ol.style.Fill({ color: '#fff' }), stroke: new ol.style.Stroke({ color: '#102d52', width: 4 }) })
       });
     }
   });
 
   const map = new ol.Map({
     target: 'map',
-    layers: [layers.satellite, layers.osm, layers.orthophoto, layers['plant-health'], elevationLayer, layers.contours, layers.cameras, importedLayer, sketchLayer, waterZoneLayer, waterResultLayer, waterPipeLayer, waterEntryLayer, locationLayer],
+    layers: [layers.satellite, layers.osm, layers.orthophoto, layers['plant-health'], elevationLayer, layers.contours, layers.cameras, importedLayer, sketchLayer, waterZoneLayer, waterPipeLayer, waterResultLayer, waterEntryLayer, locationLayer],
     controls: ol.control.defaults().extend([new ol.control.ScaleLine()]),
     view: new ol.View({ center: ol.extent.getCenter(surveyExtent), zoom: 19, minZoom: 14, maxZoom: 23 })
   });
@@ -661,7 +667,8 @@
     document.getElementById('water-path').textContent = entries.length ? totalLength.toFixed(1) + ' m total · up to ' + greatestDrop.toFixed(2) + ' m drop' : 'Add entry points for terrain paths';
     showSizingResults(zoneArea, designFlow, hydraulicFlow, pipe, dailyDemand);
     document.getElementById('water-results').hidden = false;
-    document.getElementById('water-status').textContent = (drawnArea ? drawnArea.toFixed(0) + ' m² drawn zone' : 'Using 9,262 m² survey area') + ' · preliminary sizing, verify before equipment purchase.';
+    document.getElementById('water-legend').hidden = entries.length === 0;
+    document.getElementById('water-status').textContent = entries.length ? 'Blue paths and POOL markers show terrain runoff · ' + (drawnArea ? drawnArea.toFixed(0) + ' m² drawn zone.' : 'using 9,262 m² survey area.') : 'Sizing calculated. Add at least one water entry to display terrain flow.';
   }
 
   function runRainSimulation() {
@@ -685,7 +692,8 @@
     document.getElementById('water-path').textContent = traceCount + ' representative paths · up to ' + greatestDrop.toFixed(2) + ' m drop';
     ['water-pipe-result-row', 'water-demand-row', 'water-pump-row', 'water-solar-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
     document.getElementById('water-results').hidden = false;
-    document.getElementById('water-status').textContent = intensity + ' mm/h for ' + duration + ' min · representative DTM runoff, not a flood-depth model.';
+    document.getElementById('water-legend').hidden = false;
+    document.getElementById('water-status').textContent = 'Blue paths and POOL markers show ' + intensity + ' mm/h rain for ' + duration + ' min · representative DTM runoff.';
   }
 
   function simulateWater() {
@@ -718,6 +726,9 @@
   function updateWaterMode() {
     stopWaterTools();
     const rain = document.getElementById('water-mode').value === 'rain';
+    waterResultSource.clear();
+    document.getElementById('water-results').hidden = true;
+    document.getElementById('water-legend').hidden = true;
     document.getElementById('water-irrigation-fields').hidden = rain;
     document.getElementById('water-rain-fields').hidden = !rain;
     ['water-place', 'water-pipe', 'water-zone'].forEach(function (id) { document.getElementById(id).hidden = rain; });
@@ -744,6 +755,7 @@
   document.getElementById('water-clear').addEventListener('click', function () {
     stopWaterTools();
     waterEntrySource.clear(); waterPipeSource.clear(); waterZoneSource.clear(); waterResultSource.clear();
+    document.getElementById('water-legend').hidden = true;
     document.getElementById('water-results').hidden = true;
     document.getElementById('water-status').textContent = 'Plan cleared. Add entry points and pipe routes, or choose rainfall.';
   });
