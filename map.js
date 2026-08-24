@@ -182,19 +182,38 @@
     return table;
   }
 
-  function loadPixels(url) {
-    return new Promise(function (resolve, reject) {
-      const image = new Image();
-      image.onload = function () {
+  function decodePixels(image) {
+    return new Promise(function (resolve) {
         const canvas = document.createElement('canvas');
-        canvas.width = image.naturalWidth;
-        canvas.height = image.naturalHeight;
+        canvas.width = image.naturalWidth || image.width;
+        canvas.height = image.naturalHeight || image.height;
         const context = canvas.getContext('2d', { willReadFrequently: true });
         context.drawImage(image, 0, 0);
+        if (image.close) image.close();
         resolve({ width: canvas.width, height: canvas.height, pixels: context.getImageData(0, 0, canvas.width, canvas.height).data });
-      };
-      image.onerror = reject;
-      image.src = url;
+    });
+  }
+
+  function loadPixels(url, attempt) {
+    attempt = attempt || 0;
+    const separator = url.indexOf('?') === -1 ? '?' : '&';
+    const requestUrl = attempt ? url + separator + 'retry=' + attempt : url;
+    return fetch(requestUrl, { cache: attempt ? 'reload' : 'default' }).then(function (response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.blob();
+    }).then(function (blob) {
+      if (window.createImageBitmap) return createImageBitmap(blob).then(decodePixels);
+      return new Promise(function (resolve, reject) {
+        const image = new Image();
+        const objectUrl = URL.createObjectURL(blob);
+        image.onload = function () { URL.revokeObjectURL(objectUrl); decodePixels(image).then(resolve); };
+        image.onerror = function () { URL.revokeObjectURL(objectUrl); reject(new Error('Image decode failed')); };
+        image.src = objectUrl;
+      });
+    }).catch(function (error) {
+      if (attempt >= 2) throw error;
+      elevationStatus.textContent = 'Connection interrupted; retrying elevation data…';
+      return new Promise(function (resolve) { window.setTimeout(resolve, 800 * (attempt + 1)); }).then(function () { return loadPixels(url, attempt + 1); });
     });
   }
 
@@ -279,15 +298,21 @@
     fetch('./assets/map/elevation.json').then(function (response) { return response.json(); }).then(function (metadata) {
       elevationMetadata = metadata;
       updateRangeUi();
-      return Promise.all([
-        loadPixels('./assets/map/' + name + '-elevation.png'),
-        elevationStyle.shading === 'none' ? Promise.resolve(null) : loadPixels('./assets/map/' + name + '-hillshade-' + elevationStyle.shading + '.png')
-      ]);
-    }).then(function (assets) {
+      return loadPixels('./assets/map/' + name + '-elevation.png');
+    }).then(function (pixels) {
       if (token !== elevationLoadToken) return;
-      elevationPixels = assets[0];
-      hillshadePixels = assets[1];
+      elevationPixels = pixels;
+      hillshadePixels = null;
       renderElevation();
+      if (elevationStyle.shading === 'none') return null;
+      elevationStatus.textContent = 'Adding ' + elevationStyle.shading + ' relief…';
+      return loadPixels('./assets/map/' + name + '-hillshade-' + elevationStyle.shading + '.png').then(function (shade) {
+        if (token !== elevationLoadToken) return;
+        hillshadePixels = shade;
+        renderElevation();
+      }).catch(function () {
+        if (token === elevationLoadToken) elevationStatus.textContent = 'Color elevation ready · relief unavailable';
+      });
     }).catch(function () {
       if (token === elevationLoadToken) elevationStatus.textContent = 'Elevation layer could not be loaded.';
     });
