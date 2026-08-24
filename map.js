@@ -62,7 +62,7 @@
       visible: true,
       source: new ol.source.XYZ({
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attributions: 'Tiles © Esri',
+        attributions: [new ol.Attribution({ html: 'Tiles © Esri' })],
         crossOrigin: 'anonymous',
         maxZoom: 18
       })
