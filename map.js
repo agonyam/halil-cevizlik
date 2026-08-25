@@ -9,6 +9,25 @@
   const utm35 = '+proj=utm +zone=35 +datum=WGS84 +units=m +no_defs';
   const mapViewElement = document.getElementById('map-view');
   const coordinateReadout = document.getElementById('map-coordinates');
+  const mapToolsToggle = document.getElementById('map-tools-toggle');
+  const mapTools = document.getElementById('map-tools');
+
+  function setMapToolsOpen(open) {
+    if (!mapTools || !mapToolsToggle) return;
+    mapTools.classList.toggle('mobile-open', open);
+    mapToolsToggle.classList.toggle('active', open);
+    mapToolsToggle.setAttribute('aria-expanded', String(open));
+    mapToolsToggle.textContent = open ? '× Close' : '☰ Tools';
+  }
+
+  if (mapToolsToggle) mapToolsToggle.addEventListener('click', function () {
+    setMapToolsOpen(!mapTools.classList.contains('mobile-open'));
+  });
+
+  function mapFitPadding() {
+    if (window.innerWidth > 600) return [55, 335, 55, 55];
+    return mapTools && mapTools.classList.contains('mobile-open') ? [92, 330, 72, 18] : [92, 18, 72, 18];
+  }
 
   function xyz(name, visible, opacity) {
     return new ol.layer.Tile({
@@ -210,7 +229,7 @@
     controls: ol.control.defaults().extend([new ol.control.ScaleLine()]),
     view: new ol.View({ center: ol.extent.getCenter(surveyExtent), zoom: 19, minZoom: 14, maxZoom: 23 })
   });
-  map.getView().fit(surveyExtent, map.getSize(), { padding: [55, 335, 55, 55], maxZoom: 21 });
+  map.getView().fit(surveyExtent, map.getSize(), { padding: mapFitPadding(), maxZoom: 21 });
 
   fetch('./assets/shots.geojson').then(function (response) { return response.json(); }).then(function (geojson) {
     camerasSource.addFeatures(new ol.format.GeoJSON().readFeatures(geojson, { featureProjection: 'EPSG:3857' }));
@@ -1707,7 +1726,7 @@
   histogramCanvas.addEventListener('pointerup', finishHistogramDrag);
   histogramCanvas.addEventListener('pointercancel', finishHistogramDrag);
   document.getElementById('map-fit').addEventListener('click', function () {
-    map.getView().fit(surveyExtent, map.getSize(), { padding: [55, 335, 55, 55], maxZoom: 21 });
+    map.getView().fit(surveyExtent, map.getSize(), { padding: mapFitPadding(), maxZoom: 21 });
   });
   document.getElementById('map-fullscreen').addEventListener('click', function () {
     if (!document.fullscreenElement) mapViewElement.requestFullscreen();
@@ -1736,7 +1755,7 @@
       try {
         importedSource.clear();
         importedSource.addFeatures(new ol.format.GeoJSON().readFeatures(JSON.parse(reader.result), { featureProjection: 'EPSG:3857' }));
-        map.getView().fit(importedSource.getExtent(), map.getSize(), { padding: [55, 335, 55, 55] });
+        map.getView().fit(importedSource.getExtent(), map.getSize(), { padding: mapFitPadding() });
       } catch (error) {
         window.alert('This GeoJSON file could not be read.');
       }
@@ -1751,12 +1770,14 @@
 
   function showMap() {
     if (window.setSurvey3dActive) window.setSurvey3dActive(false);
+    if (window.innerWidth <= 600) setMapToolsOpen(false);
+    document.body.classList.remove('mobile-3d-sidebar-open');
     document.querySelector('.model-view').classList.add('map-active');
     mapViewElement.hidden = false;
     history.replaceState(null, '', location.pathname + '?view=2d');
     setTimeout(function () {
       map.updateSize();
-      map.getView().fit(surveyExtent, map.getSize(), { padding: [55, 335, 55, 55], maxZoom: 21 });
+      map.getView().fit(surveyExtent, map.getSize(), { padding: mapFitPadding(), maxZoom: 21 });
     }, 0);
   }
   function show3d() {
@@ -1764,6 +1785,8 @@
     stopWaterAnimation();
     mapViewElement.hidden = true;
     document.querySelector('.model-view').classList.remove('map-active');
+    setMapToolsOpen(false);
+    if (window.innerWidth <= 600) document.body.classList.remove('mobile-3d-sidebar-open');
     if (window.setSurvey3dActive) window.setSurvey3dActive(true);
     history.replaceState(null, '', location.pathname);
   }

@@ -87,6 +87,7 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
 .map-quick-layers { position: absolute; z-index: 6; top: 10px; right: 10px; display: flex; gap: 4px; }
 .map-quick-layers button, .map-bottom-actions button { border: 1px solid #819095; border-radius: 3px; background: rgba(65,88,94,.94); padding: 7px 10px; color: white; cursor: pointer; }
 .map-quick-layers button.active { background: #2e859f; }
+.map-tools-toggle { display: none; }
 .map-bottom-actions { position: absolute; z-index: 6; right: 14px; bottom: 14px; display: flex; gap: 6px; }
 .mode-switch { min-width: 72px; }
 .map-upload { position: relative; border: 1px solid #9dabad; border-radius: 3px; background: #e7ebec; padding: 7px 8px !important; color: #24363b; cursor: pointer; text-align: center; }
@@ -144,17 +145,64 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
 .webodm-progress { color: #b8c3c7; font-size: 11px; }
 
 @media (max-width: 600px) {
+  #potree_sidebar_container {
+    z-index: 30;
+    width: min(86vw, 300px) !important;
+    box-sizing: border-box;
+    padding-top: 54px;
+    transform: translateX(-105%);
+    transition: transform .25s ease;
+  }
+  .mobile-3d-sidebar-open #potree_sidebar_container { transform: translateX(0); box-shadow: 8px 0 24px rgba(0, 0, 0, .45); }
+  #potree_render_area { left: 0 !important; }
+  .potree_menu_toggle {
+    position: fixed !important;
+    z-index: 40 !important;
+    top: 8px;
+    left: 8px;
+    margin: 0 !important;
+    border-radius: 5px;
+    background: rgba(18, 38, 45, .94) !important;
+  }
   .survey-title { right: 10px; top: 8px; }
-  .model-action-buttons { right: 8px; left: 8px; bottom: 8px; overflow-x: auto; }
+  .model-action-buttons { right: 8px; left: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); overflow-x: auto; }
   .model-action-buttons button, .model-action-buttons select { white-space: nowrap; padding: 7px 9px; }
   .model-action-buttons span { display: none; }
-  .map-sidebar { top: 46px; right: 6px; width: 210px; padding-inline: 9px; }
+  .map-sidebar {
+    z-index: 18;
+    top: 88px;
+    right: 7px;
+    width: min(88vw, 320px);
+    max-height: calc(100% - 154px - env(safe-area-inset-bottom));
+    overflow-x: hidden;
+    padding-inline: 11px;
+    transform: translateX(calc(100% + 14px));
+    transition: transform .25s ease;
+  }
+  .map-sidebar.mobile-open { transform: translateX(0); }
+  .map-sidebar > *, .map-sidebar label, .map-sidebar select, .map-sidebar input { max-width: 100%; }
   .map-sidebar h2 { margin-inline: -9px; padding-inline: 9px; }
-  .irrigation-fields > label, #water-irrigation-fields label, #water-rain-fields label { grid-template-columns: 1fr; gap: 2px; }
+  .irrigation-fields > label, #water-irrigation-fields label, #water-rain-fields label, #water-drip-fields label { grid-template-columns: 1fr; gap: 2px; }
+  .map-tools-toggle {
+    position: absolute;
+    z-index: 19;
+    top: 50px;
+    right: 7px;
+    display: block;
+    border: 1px solid #819095;
+    border-radius: 4px;
+    background: rgba(30, 61, 70, .96);
+    padding: 8px 11px;
+    color: #fff;
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  }
+  .map-tools-toggle.active { background: #2e859f; }
   .water-legend { top: 94px; left: 7px; right: 7px; gap: 7px; overflow-x: auto; white-space: nowrap; }
   .water-timeline { top: 139px; right: 7px; left: 7px; grid-template-columns: 32px 1fr 62px; }
   .map-quick-layers { left: 6px; right: 6px; overflow-x: auto; }
   .map-quick-layers button { white-space: nowrap; }
+  .map-bottom-actions { right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); }
   #map-coordinates { left: 8px; bottom: 56px; max-width: calc(100% - 16px); font-size: 10px; }
   #map-view .ol-scale-line { left: 8px; bottom: 92px; }
   #map-view .ol-attribution { right: 8px; bottom: 92px; }

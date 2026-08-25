@@ -93,6 +93,16 @@
     viewer.setLanguage('en');
     $('#menu_tools').next().show();
     if (window.innerWidth > 600) viewer.toggleSidebar();
+    else {
+      document.body.classList.remove('mobile-3d-sidebar-open');
+      const menuToggle = document.querySelector('.potree_menu_toggle');
+      if (menuToggle) {
+        menuToggle.onclick = function () {
+          document.body.classList.toggle('mobile-3d-sidebar-open');
+        };
+        window.setTimeout(function () { document.body.appendChild(menuToggle); }, 0);
+      }
+    }
 
     $('#textured_model_button').html(
       '<label class="webodm-menu-row"><input id="toggle-textured-model" type="checkbox"> Show textured model</label>' +
