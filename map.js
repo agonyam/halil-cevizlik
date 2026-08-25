@@ -948,7 +948,9 @@
     const capacity = numberValue('drip-capacity', 2000);
     const capacityRatio = requiredFlow ? Math.min(1, capacity / requiredFlow) : 1;
     const capacityLimited = capacityRatio < .999;
-    const severelyCapacityLimited = capacityRatio < .9;
+    const lateralEmitterCounts = pipes.filter(function (pipe) { return pipe.get('pipeRole') === 'dripline'; }).map(function (pipe) { return (emittersByPipe.get(pipe.get('pipeId')) || []).length; }).filter(function (count) { return count > 0; });
+    const minimumLateralFlowLh = lateralEmitterCounts.length ? Math.min.apply(Math, lateralEmitterCounts) * nominalFlow : nominalFlow;
+    const severelyCapacityLimited = capacity < minimumLateralFlowLh;
     const deliveryScale = capacityLimited ? Math.min(1, capacity / Math.max(.001, predictedFlow)) : 1;
     emitters.forEach(function (emitter) {
       emitter.flowLh *= deliveryScale;
@@ -969,6 +971,7 @@
       capacityRatio: capacityRatio,
       capacityLimited: capacityLimited,
       severelyCapacityLimited: severelyCapacityLimited,
+      minimumLateralFlowLh: minimumLateralFlowLh,
       maximumSupportedEmitters: Math.floor(capacity / nominalFlow),
       zonesRequired: capacityLimited ? Math.ceil(requiredFlow / capacity) : 1,
       minPressureBar: pressures.length ? Math.min.apply(Math, pressures) : 0,
@@ -1305,7 +1308,7 @@
       document.getElementById('water-uniformity').textContent = 'Not valid — source capacity is below design demand';
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-legend').hidden = true;
-      document.getElementById('water-status').textContent = 'Severe source shortage: ' + network.availableFlowLh.toFixed(0) + ' of ' + network.requiredFlowLh.toFixed(0) + ' L/h available (' + (network.capacityRatio * 100).toFixed(1) + '%). Increase source capacity or divide the network into at least ' + network.zonesRequired + ' independently controlled zones.';
+      document.getElementById('water-status').textContent = 'Severe source shortage: ' + network.availableFlowLh.toFixed(0) + ' L/h available, but the smallest complete lateral needs about ' + network.minimumLateralFlowLh.toFixed(0) + ' L/h. Increase source capacity or redesign the lateral zones.';
       return Promise.resolve();
     }
     network.emitters.forEach(function (emitter) {
