@@ -1,6 +1,9 @@
 (function () {
   'use strict';
 
+  const surveyConfig = window.SURVEY_CONFIG || {};
+  const surveySlug = surveyConfig.slug || 'akcakoyun';
+  const sharedBase = surveyConfig.sharedBase || '.';
   const loading = document.getElementById('loading');
   const loadingText = document.getElementById('loading-text');
   const toast = document.getElementById('toast');
@@ -136,7 +139,7 @@
     progress.textContent = 'Loading…';
     const loader = new THREE.GLTFLoader();
     const draco = new THREE.DRACOLoader();
-    draco.setDecoderPath('./vendor/draco/');
+    draco.setDecoderPath(sharedBase + '/vendor/draco/');
     loader.setDRACOLoader(draco);
     loader.load('./assets/textured_model.glb', function (gltf) {
       texturedModel = gltf.scene;
@@ -186,7 +189,7 @@
     Promise.all([
       fetch('./assets/shots.geojson').then(function (response) { return response.json(); }),
       new Promise(function (resolve, reject) {
-        new THREE.GLTFLoader().load('./vendor/camera.glb', function (gltf) { resolve(gltf.scene); }, undefined, reject);
+        new THREE.GLTFLoader().load(sharedBase + '/vendor/camera.glb', function (gltf) { resolve(gltf.scene); }, undefined, reject);
       })
     ]).then(function (results) {
       const geojson = results[0];
@@ -231,7 +234,7 @@
   document.getElementById('snapshot').addEventListener('click', function () {
     viewer.renderer.render(viewer.scene.scene, viewer.scene.getActiveCamera());
     const link = document.createElement('a');
-    link.download = 'akcakoyun-3d.png';
+    link.download = surveySlug + '-3d.png';
     link.href = viewer.renderer.domElement.toDataURL('image/png');
     link.click();
   });

@@ -1,7 +1,10 @@
 (function () {
   'use strict';
 
-  const surveyExtent4326 = [27.1369278057887, 39.798648554838, 27.138907571646, 39.8003184784371];
+  const surveyConfig = window.SURVEY_CONFIG || {};
+  const surveySlug = surveyConfig.slug || 'akcakoyun';
+  const sharedBase = surveyConfig.sharedBase || '.';
+  const surveyExtent4326 = surveyConfig.extent4326 || [27.1369278057887, 39.798648554838, 27.138907571646, 39.8003184784371];
   const surveyExtent = ol.proj.transformExtent(surveyExtent4326, 'EPSG:4326', 'EPSG:3857');
   const utm35 = '+proj=utm +zone=35 +datum=WGS84 +units=m +no_defs';
   const mapViewElement = document.getElementById('map-view');
@@ -38,7 +41,7 @@
   let waterPreviousTerrainOpacity = null;
   let waterBackgroundLayer = null;
   let waterTerrainOpacity = .58;
-  const elevationRanges = {
+  const elevationRanges = surveyConfig.elevationRanges || {
     dtm: { min: 280.370, max: 284.936 },
     dsm: { min: 281.165, max: 297.314 }
   };
@@ -532,7 +535,7 @@
     });
   }
 
-  const surveyAreaSquareMeters = 9262;
+  const surveyAreaSquareMeters = surveyConfig.areaSquareMeters || 9262;
   const greenAmptSoils = {
     sandy: { conductivity: 30, suction: 60, moistureDeficit: .20, manning: .035 },
     loam: { conductivity: 12, suction: 110, moistureDeficit: .25, manning: .05 },
@@ -719,7 +722,7 @@
   function solveHydrology(options) {
     const grid = buildHydrologyGrid();
     return new Promise(function (resolve, reject) {
-      const worker = new Worker('./hydrology-worker.js');
+      const worker = new Worker(sharedBase + '/hydrology-worker.js');
       worker.onmessage = function (event) {
         worker.terminate();
         if (event.data.error) { reject(new Error(event.data.error)); return; }
@@ -1388,7 +1391,7 @@
     });
   }
 
-  const waterPlanStorageKey = 'halil-cevizlik-water-plan-v1';
+  const waterPlanStorageKey = surveyConfig.waterPlanStorageKey || 'halil-cevizlik-water-plan-v1';
   const waterPlanSettingIds = [
     'water-mode', 'water-soil', 'water-flow', 'water-flow-unit', 'water-flow-basis', 'water-duration', 'water-diameter', 'water-pressure', 'water-source-lift', 'water-depth', 'water-hours', 'pump-efficiency', 'solar-hours',
     'rain-intensity', 'rain-duration', 'drip-pipe-role', 'drip-main-diameter', 'drip-submain-diameter', 'drip-lateral-diameter', 'drip-emitter-spacing', 'drip-emitter-flow', 'drip-emitter-type', 'drip-pressure', 'drip-capacity', 'drip-source-lift', 'drip-pump-efficiency', 'drip-solar-hours', 'drip-duration', 'drip-wetting-radius', 'water-opacity'
@@ -1473,7 +1476,7 @@
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'akcakoyun-irrigation-plan-' + new Date().toISOString().slice(0, 10) + '.json';
+    anchor.download = surveySlug + '-irrigation-plan-' + new Date().toISOString().slice(0, 10) + '.json';
     document.body.appendChild(anchor); anchor.click(); anchor.remove();
     window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
     document.getElementById('water-status').textContent = 'Plan saved to a JSON file and autosaved in this browser.';
