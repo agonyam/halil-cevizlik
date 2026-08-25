@@ -990,13 +990,18 @@
     const wetting = new Float32Array(grid.size);
     const arrivals = new Float32Array(grid.size); arrivals.fill(Infinity);
     let maxDepth = 0;
+    let referenceDepth = 0;
     emitters.forEach(function (emitter) {
       const centerX = Math.max(0, Math.min(grid.width - 1, Math.floor((emitter.coordinate[0] - surveyExtent[0]) / (surveyExtent[2] - surveyExtent[0]) * grid.width)));
       const centerY = Math.max(0, Math.min(grid.height - 1, Math.floor((surveyExtent[3] - emitter.coordinate[1]) / (surveyExtent[3] - surveyExtent[1]) * grid.height)));
-      const rx = Math.max(1, Math.ceil(radiusMeters / Math.max(.1, grid.cellWidth)));
-      const ry = Math.max(1, Math.ceil(radiusMeters / Math.max(.1, grid.cellHeight)));
+      const flowRatio = Math.max(.01, Math.min(1, emitter.flowLh / Math.max(.001, emitter.targetFlowLh || emitter.flowLh)));
+      const effectiveRadius = radiusMeters * Math.sqrt(flowRatio);
+      const rx = Math.max(1, Math.ceil(effectiveRadius / Math.max(.1, grid.cellWidth)));
+      const ry = Math.max(1, Math.ceil(effectiveRadius / Math.max(.1, grid.cellHeight)));
       const volumeLiters = emitter.flowLh * durationMinutes / 60;
       const nominalDepth = volumeLiters / Math.max(.1, Math.PI * radiusMeters * radiusMeters);
+      const targetVolumeLiters = (emitter.targetFlowLh || emitter.flowLh) * durationMinutes / 60;
+      referenceDepth = Math.max(referenceDepth, targetVolumeLiters / Math.max(.1, Math.PI * radiusMeters * radiusMeters));
       for (let dy = -ry; dy <= ry; dy += 1) {
         for (let dx = -rx; dx <= rx; dx += 1) {
           const x = centerX + dx; const y = centerY + dy;
@@ -1004,15 +1009,15 @@
           const index = y * grid.width + x;
           if (!grid.valid[index]) continue;
           const distance = Math.hypot(dx * grid.cellWidth, dy * grid.cellHeight);
-          if (distance > radiusMeters) continue;
-          const falloff = Math.max(.15, 1 - distance / radiusMeters);
+          if (distance > effectiveRadius) continue;
+          const falloff = Math.max(.15, 1 - distance / effectiveRadius);
           wetting[index] += nominalDepth * falloff;
           arrivals[index] = Math.min(arrivals[index], .03 + distance / radiusMeters * .35);
           maxDepth = Math.max(maxDepth, wetting[index]);
         }
       }
     });
-    return { wetting: wetting, arrivals: arrivals, maxDepthMm: maxDepth };
+    return { wetting: wetting, arrivals: arrivals, maxDepthMm: maxDepth, referenceDepthMm: referenceDepth };
   }
 
   function renderWaterTimeline(progress) {
@@ -1029,7 +1034,7 @@
         const arrival = state.wettingArrivals[i];
         if (!Number.isFinite(arrival) || progress <= arrival) continue;
         const localProgress = Math.min(1, (progress - arrival) / Math.max(.001, 1 - arrival));
-        const depthStrength = Math.min(1, state.wetting[i] / Math.max(.1, state.maxWettingDepthMm));
+        const depthStrength = Math.min(1, state.wetting[i] / Math.max(.1, state.wettingReferenceDepthMm || state.maxWettingDepthMm));
         const offset = i * 4;
         image.data[offset] = 0;
         image.data[offset + 1] = 220 + Math.round(35 * depthStrength);
@@ -1037,7 +1042,7 @@
         image.data[offset + 3] = Math.round((120 + 120 * depthStrength) * Math.sqrt(localProgress));
       }
     }
-    if (state.infiltrationSnapshots) {
+    if (state.infiltrationSnapshots && !state.wetting) {
       const infiltrationSnapshot = state.infiltrationSnapshots[Math.min(state.infiltrationSnapshots.length - 1, Math.round(progress * (state.infiltrationSnapshots.length - 1)))];
       for (let i = 0; i < grid.size; i += 1) {
         if (!grid.valid[i] || !infiltrationSnapshot[i]) continue;
@@ -1331,7 +1336,7 @@
     return solveHydrology({ mode: 'irrigation', totalMinutes: duration, totalFlow: network.totalFlowLh / 60, sourceWeights: sourceWeightsFromOutlets(grid, sourceOutlets, network.totalFlowLh / 60, numberValue('drip-lateral-diameter', 16)), soil: soil }).then(function (solved) {
       const infiltrated = solved.infiltratedLiters;
       const runoff = Math.max(0, solved.appliedLiters - infiltrated);
-      waterSimulationState = { mode: 'drip', totalMinutes: duration, grid: grid, snapshots: solved.snapshots, snapshotScale: solved.snapshotScale, maxPoolDepth: solved.maxDepth, infiltrationSnapshots: solved.infiltrationSnapshots, infiltrationSnapshotScale: solved.infiltrationSnapshotScale, maxInfiltrationDepth: solved.maxInfiltrationDepth, wetting: wetting.wetting, wettingArrivals: wetting.arrivals, maxWettingDepthMm: wetting.maxDepthMm };
+      waterSimulationState = { mode: 'drip', totalMinutes: duration, grid: grid, snapshots: solved.snapshots, snapshotScale: solved.snapshotScale, maxPoolDepth: solved.maxDepth, infiltrationSnapshots: solved.infiltrationSnapshots, infiltrationSnapshotScale: solved.infiltrationSnapshotScale, maxInfiltrationDepth: solved.maxInfiltrationDepth, wetting: wetting.wetting, wettingArrivals: wetting.arrivals, maxWettingDepthMm: wetting.maxDepthMm, wettingReferenceDepthMm: wetting.referenceDepthMm };
       document.getElementById('water-timeline').hidden = false;
       setWaterTimeline(0); playWaterTimeline();
       document.getElementById('water-applied').textContent = formatVolume(solved.appliedLiters) + ' per run';
