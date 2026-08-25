@@ -36,28 +36,35 @@ body { background: #0c1519; font-family: Arial, sans-serif; }
 .irrigation-controls h2 span { border-radius: 10px; background: #1c758d; padding: 2px 7px; color: #eafaff; font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 .irrigation-note { margin: 7px 0 9px; color: #c6d4d7; font-size: 11px; line-height: 1.4; }
 .irrigation-fields { display: grid; gap: 5px; }
-.irrigation-fields > label, #water-irrigation-fields label, #water-rain-fields label { display: grid; grid-template-columns: 1fr 1.35fr; align-items: center; gap: 7px; }
-#water-irrigation-fields, #water-rain-fields { display: grid; gap: 5px; }
-#water-irrigation-fields[hidden], #water-rain-fields[hidden] { display: none; }
+.irrigation-fields > label, #water-irrigation-fields label, #water-rain-fields label, #water-drip-fields label { display: grid; grid-template-columns: 1fr 1.35fr; align-items: center; gap: 7px; }
+#water-irrigation-fields, #water-rain-fields, #water-drip-fields { display: grid; gap: 5px; }
+#water-irrigation-fields[hidden], #water-rain-fields[hidden], #water-drip-fields[hidden] { display: none; }
 .irrigation-fields label > span { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; color: #cbd6d8; font-size: 11px; }
 .irrigation-fields input, .irrigation-fields select { min-width: 0; width: 100%; box-sizing: border-box; border: 1px solid #9dabad; border-radius: 3px; background: #f5f7f7; padding: 5px; color: #24363b; }
+.irrigation-fields .flow-input { grid-template-columns: minmax(0, 1fr) 64px; }
 .irrigation-actions { margin-top: 9px; }
+.water-plan-actions { margin-top: 5px; }
 .water-opacity-control { display: grid; grid-template-columns: 1fr minmax(90px, 1.35fr) 38px; align-items: center; gap: 7px; margin-top: 9px; color: #c6d4d7; font-size: 11px; }
 .water-opacity-control input { width: 100%; accent-color: #1bbcf0; }
 .water-opacity-control output { color: #fff; font: 11px monospace; text-align: right; }
 .water-results { margin: 10px 0 0; border-top: 1px solid #577077; }
 .water-results div { display: grid; grid-template-columns: 1fr 1.55fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid rgba(96,119,125,.45); font-size: 11px; }
+.water-results [hidden] { display: none; }
 .water-results dt { color: #b9c9cc; }
 .water-results dd { margin: 0; color: #fff; text-align: right; line-height: 1.35; }
 .water-status { margin: 8px 0 0; color: #8fdaf0; font-size: 11px; line-height: 1.4; }
 .water-legend { position: absolute; z-index: 6; top: 58px; left: 12px; display: flex; align-items: center; gap: 12px; border: 1px solid rgba(255,255,255,.45); border-radius: 4px; background: rgba(18,42,55,.92); padding: 7px 10px; color: #fff; font-size: 11px; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
 .water-legend[hidden] { display: none; }
 .water-legend span { display: flex; align-items: center; gap: 5px; }
+.water-legend span[hidden] { display: none; }
 .water-legend i { display: inline-block; flex: 0 0 auto; }
 .water-key-wetting { width: 12px; height: 10px; border: 1px solid #d8fff5; border-radius: 2px; background: rgba(14, 211, 166, .8); }
 .water-key-flow { width: 24px; height: 4px; border: 2px solid #fff; border-radius: 3px; background: #087be8; }
 .water-key-pool { width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #075be8; }
+.water-key-low-pressure { width: 10px; height: 10px; border: 2px solid #fff; border-radius: 50%; background: #ff3b30; }
 .water-key-entry { width: 10px; height: 10px; border: 2px solid #102d52; border-radius: 50%; background: #ffdc52; }
+.water-entry-map-marker { position: relative; z-index: 20; border: 2px solid #102d52; border-radius: 12px; background: #ffdc52; padding: 3px 7px; color: #102d52; font: 700 10px Arial, sans-serif; line-height: 1; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,.55); pointer-events: none; }
+.water-entry-map-marker::after { position: absolute; top: 100%; left: 50%; width: 0; height: 0; border: 6px solid transparent; border-top-color: #102d52; content: ''; transform: translateX(-50%); }
 .water-timeline { position: absolute; z-index: 6; top: 101px; left: 12px; display: grid; grid-template-columns: 34px minmax(180px, 330px) 72px; align-items: center; gap: 8px; border: 1px solid rgba(255,255,255,.45); border-radius: 4px; background: rgba(18,42,55,.92); padding: 6px 8px; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
 .water-timeline[hidden] { display: none; }
 .water-timeline button { height: 28px; border: 1px solid #b8e7f5; border-radius: 3px; background: #147da5; color: #fff; cursor: pointer; }

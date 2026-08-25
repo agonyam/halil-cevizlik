@@ -111,6 +111,7 @@
   const waterPipeSource = new ol.source.Vector();
   const waterZoneSource = new ol.source.Vector();
   const waterResultSource = new ol.source.Vector();
+  const waterEntryOverlays = [];
   const sketchLayer = new ol.layer.Vector({
     source: sketchSource,
     style: new ol.style.Style({
@@ -148,6 +149,12 @@
     source: waterResultSource,
     style: function (feature) {
       const type = feature.get('waterType');
+      if (type === 'emitter-low') return new ol.style.Style({
+        zIndex: 100,
+        image: new ol.style.Circle({ radius: 6, fill: new ol.style.Fill({ color: '#ff3b30' }), stroke: new ol.style.Stroke({ color: '#fff', width: 2 }) }),
+        text: new ol.style.Text({ text: '!', font: 'bold 9px Arial', fill: new ol.style.Fill({ color: '#fff' }) })
+      });
+      if (type === 'emitter') return new ol.style.Style({ image: new ol.style.Circle({ radius: 4, fill: new ol.style.Fill({ color: '#52ffd2' }), stroke: new ol.style.Stroke({ color: '#fff', width: 1.5 }) }) });
       if (type === 'wetting') return new ol.style.Style({ fill: new ol.style.Fill({ color: 'rgba(0, 111, 255, .3)' }), stroke: new ol.style.Stroke({ color: '#dff8ff', width: 3 }) });
       if (type === 'pool') return new ol.style.Style({
         image: new ol.style.Circle({ radius: 11, fill: new ol.style.Fill({ color: '#075be8' }), stroke: new ol.style.Stroke({ color: '#fff', width: 3 }) }),
@@ -159,9 +166,24 @@
       ];
     }
   });
+  waterResultLayer.setZIndex(900);
   const waterPipeLayer = new ol.layer.Vector({
     source: waterPipeSource,
-    style: new ol.style.Style({ stroke: new ol.style.Stroke({ color: '#173d79', width: 6 }), image: new ol.style.Circle({ radius: 4, fill: new ol.style.Fill({ color: '#77c9f2' }), stroke: new ol.style.Stroke({ color: '#173d79', width: 2 }) }) })
+    style: function (feature) {
+      const coordinates = feature.getGeometry().getCoordinates();
+      const role = feature.get('pipeRole') || 'delivery';
+      const color = role === 'mainline' ? '#143d8f' : role === 'submain' ? '#1788b8' : role === 'dripline' ? '#18a97f' : '#173d79';
+      const styles = [new ol.style.Style({ stroke: new ol.style.Stroke({ color: color, width: role === 'mainline' ? 8 : role === 'submain' ? 6 : 4, lineDash: role === 'dripline' ? [5, 4] : undefined }), image: new ol.style.Circle({ radius: 4, fill: new ol.style.Fill({ color: '#77c9f2' }), stroke: new ol.style.Stroke({ color: color, width: 2 }) }) })];
+      if (coordinates.length > 1 && role === 'delivery') {
+        const previous = coordinates[coordinates.length - 2]; const end = coordinates[coordinates.length - 1];
+        const angle = Math.atan2(end[1] - previous[1], end[0] - previous[0]);
+        styles.push(new ol.style.Style({
+          geometry: new ol.geom.Point(end),
+          image: new ol.style.RegularShape({ points: 3, radius: 10, rotation: Math.PI / 2 - angle, fill: new ol.style.Fill({ color: '#77c9f2' }), stroke: new ol.style.Stroke({ color: '#102d52', width: 2 }) })
+        }));
+      }
+      return styles;
+    }
   });
   const waterZoneLayer = new ol.layer.Vector({
     source: waterZoneSource,
@@ -171,11 +193,13 @@
     source: waterEntrySource,
     style: function (feature) {
       return new ol.style.Style({
-        image: new ol.style.Circle({ radius: 10, fill: new ol.style.Fill({ color: '#ffdc52' }), stroke: new ol.style.Stroke({ color: '#102d52', width: 4 }) }),
-        text: new ol.style.Text({ text: String(feature.get('entryNumber') || ''), offsetY: -20, font: 'bold 12px Arial', fill: new ol.style.Fill({ color: '#fff' }), stroke: new ol.style.Stroke({ color: '#102d52', width: 4 }) })
+        zIndex: 1000,
+        image: new ol.style.Circle({ radius: 13, fill: new ol.style.Fill({ color: '#ffdc52' }), stroke: new ol.style.Stroke({ color: '#102d52', width: 5 }) }),
+        text: new ol.style.Text({ text: 'ENTRY ' + String(feature.get('entryNumber') || ''), offsetY: -25, font: 'bold 12px Arial', fill: new ol.style.Fill({ color: '#fff' }), stroke: new ol.style.Stroke({ color: '#102d52', width: 5 }) })
       });
     }
   });
+  waterEntryLayer.setZIndex(1000);
 
   const map = new ol.Map({
     target: 'map',
@@ -413,7 +437,10 @@
 
   let draw = null;
   let waterDraw = null;
+  let waterSnap = null;
+  let waterSnapFeatures = null;
   let waterTool = null;
+  let waterPipeSequence = 1;
   const resultOverlays = [];
 
   function toUtm(coordinate) {
@@ -433,6 +460,26 @@
       distance += Math.hypot(b[0] - a[0], b[1] - a[1]);
     }
     return distance;
+  }
+
+  function distanceAlongCoordinates(coordinates, point) {
+    const target = toUtm(point);
+    let travelled = 0;
+    let nearestDistance = Infinity;
+    let nearestAlong = 0;
+    for (let i = 1; i < coordinates.length; i += 1) {
+      const start = toUtm(coordinates[i - 1]);
+      const end = toUtm(coordinates[i]);
+      const dx = end[0] - start[0]; const dy = end[1] - start[1];
+      const lengthSquared = dx * dx + dy * dy;
+      const length = Math.sqrt(lengthSquared);
+      const progress = lengthSquared ? Math.max(0, Math.min(1, ((target[0] - start[0]) * dx + (target[1] - start[1]) * dy) / lengthSquared)) : 0;
+      const projectedX = start[0] + dx * progress; const projectedY = start[1] + dy * progress;
+      const gap = Math.hypot(target[0] - projectedX, target[1] - projectedY);
+      if (gap < nearestDistance) { nearestDistance = gap; nearestAlong = travelled + length * progress; }
+      travelled += length;
+    }
+    return nearestAlong;
   }
 
   function formatArea(coordinates) {
@@ -498,12 +545,38 @@
     return Number.isFinite(value) && value > 0 ? value : fallback;
   }
 
+  function flowLitersMinuteValue() {
+    const value = numberValue('water-flow', 8);
+    return document.getElementById('water-flow-unit').value === 'hour' ? value / 60 : value;
+  }
+
+  function totalIrrigationFlow(entryCount) {
+    const flow = flowLitersMinuteValue();
+    return document.getElementById('water-flow-basis').value === 'total' ? flow : flow * entryCount;
+  }
+
   function stopWaterTools() {
     waterTool = null;
     if (waterDraw) map.removeInteraction(waterDraw);
+    if (waterSnap) map.removeInteraction(waterSnap);
     waterDraw = null;
-    ['water-place', 'water-pipe', 'water-zone'].forEach(function (id) { document.getElementById(id).classList.remove('active'); });
+    waterSnap = null;
+    waterSnapFeatures = null;
+    ['water-place', 'water-pipe', 'water-erase', 'water-zone'].forEach(function (id) { document.getElementById(id).classList.remove('active'); });
     map.getTargetElement().style.cursor = '';
+  }
+
+  function addWaterEntryOverlay(feature) {
+    const element = document.createElement('div');
+    element.className = 'water-entry-map-marker';
+    element.textContent = 'ENTRY ' + feature.get('entryNumber');
+    const overlay = new ol.Overlay({ element: element, position: feature.getGeometry().getCoordinates(), positioning: 'bottom-center', offset: [0, -10], stopEvent: false });
+    map.addOverlay(overlay);
+    waterEntryOverlays.push(overlay);
+  }
+
+  function clearWaterEntryOverlays() {
+    waterEntryOverlays.splice(0).forEach(function (overlay) { map.removeOverlay(overlay); });
   }
 
   function ensureDtm() {
@@ -680,9 +753,40 @@
     });
   }
 
-  function sourceWeightsFromEntries(grid, entryCoordinates) {
+  function irrigationOutlets(entryFeatures) {
+    const pipes = waterPipeSource.getFeatures();
+    const outlets = [];
+    entryFeatures.forEach(function (entry) {
+      const entryNumber = entry.get('entryNumber');
+      const connected = pipes.filter(function (pipeFeature) { return pipeFeature.get('entryNumber') === entryNumber; });
+      if (!connected.length) {
+        outlets.push({ coordinate: entry.getGeometry().getCoordinates(), direction: null, weight: 1 / entryFeatures.length });
+        return;
+      }
+      const terminalPipes = connected.filter(function (pipeFeature) {
+        const coordinates = pipeFeature.getGeometry().getCoordinates();
+        const end = coordinates[coordinates.length - 1];
+        return !connected.some(function (candidate) {
+          if (candidate === pipeFeature) return false;
+          return distanceMeters([end, candidate.getGeometry().getFirstCoordinate()]) < 1;
+        });
+      });
+      const terminals = terminalPipes.length ? terminalPipes : connected;
+      terminals.forEach(function (pipeFeature) {
+        const coordinates = pipeFeature.getGeometry().getCoordinates();
+        const end = coordinates[coordinates.length - 1];
+        const previous = coordinates[coordinates.length - 2];
+        const dx = end[0] - previous[0]; const dy = end[1] - previous[1];
+        const length = Math.max(.000001, Math.hypot(dx, dy));
+        outlets.push({ coordinate: end, direction: [dx / length, dy / length], weight: 1 / entryFeatures.length / terminals.length });
+      });
+    });
+    return outlets;
+  }
+
+  function sourceWeightsFromOutlets(grid, outlets, totalFlow, diameterMm) {
     const weights = new Float32Array(grid.size);
-    entryCoordinates.forEach(function (coordinate) {
+    function addCoordinate(coordinate, amount) {
       const x = Math.max(0, Math.min(grid.width - 1, Math.floor((coordinate[0] - surveyExtent[0]) / (surveyExtent[2] - surveyExtent[0]) * grid.width)));
       const y = Math.max(0, Math.min(grid.height - 1, Math.floor((surveyExtent[3] - coordinate[1]) / (surveyExtent[3] - surveyExtent[1]) * grid.height)));
       let nearest = -1;
@@ -698,12 +802,172 @@
           }
         }
       }
-      if (nearest >= 0) weights[nearest] += 1;
+      if (nearest >= 0) weights[nearest] += amount;
+    }
+    outlets.forEach(function (outlet) {
+      if (!outlet.direction) { addCoordinate(outlet.coordinate, outlet.weight); return; }
+      const outletFlow = totalFlow * outlet.weight;
+      const outletVelocity = pipeMetrics(outletFlow, diameterMm).velocity;
+      const jetLengthMeters = Math.max(.5, Math.min(8, outletVelocity * .7));
+      const latitude = ol.proj.toLonLat(outlet.coordinate)[1] * Math.PI / 180;
+      const mapUnitsPerMeter = 1 / Math.max(.2, Math.cos(latitude));
+      const samples = Math.max(2, Math.min(8, Math.ceil(jetLengthMeters / Math.max(.5, Math.min(grid.cellWidth, grid.cellHeight)))));
+      for (let sample = 0; sample <= samples; sample += 1) {
+        const distance = jetLengthMeters * mapUnitsPerMeter * sample / samples;
+        addCoordinate([outlet.coordinate[0] + outlet.direction[0] * distance, outlet.coordinate[1] + outlet.direction[1] * distance], outlet.weight * (.35 + sample / samples));
+      }
     });
     let total = 0;
     for (let i = 0; i < weights.length; i += 1) total += weights[i];
     if (total) for (let i = 0; i < weights.length; i += 1) weights[i] /= total;
     return weights;
+  }
+
+  function dripPipeDiameter(role) {
+    if (role === 'mainline') return numberValue('drip-main-diameter', 40);
+    if (role === 'submain') return numberValue('drip-submain-diameter', 32);
+    return numberValue('drip-lateral-diameter', 16);
+  }
+
+  function pointsAlongPipe(feature, spacing) {
+    const coordinates = feature.getGeometry().getCoordinates();
+    const segments = [];
+    let total = 0;
+    for (let i = 1; i < coordinates.length; i += 1) {
+      const length = distanceMeters([coordinates[i - 1], coordinates[i]]);
+      segments.push({ start: coordinates[i - 1], end: coordinates[i], from: total, length: length });
+      total += length;
+    }
+    if (!total) return [];
+    const offsets = [];
+    for (let offset = Math.min(spacing / 2, total / 2); offset < total; offset += spacing) offsets.push(offset);
+    if (!offsets.length) offsets.push(total / 2);
+    return offsets.map(function (offset) {
+      const segment = segments.find(function (candidate) { return offset <= candidate.from + candidate.length; }) || segments[segments.length - 1];
+      const progress = segment.length ? (offset - segment.from) / segment.length : 0;
+      return { coordinate: [segment.start[0] + (segment.end[0] - segment.start[0]) * progress, segment.start[1] + (segment.end[1] - segment.start[1]) * progress], distance: offset };
+    });
+  }
+
+  function hazenWilliamsLoss(length, flowLitersHour, diameterMm) {
+    const flow = Math.max(0, flowLitersHour) / 3600000;
+    const diameter = diameterMm / 1000;
+    return length && flow && diameter ? 10.67 * length * Math.pow(flow, 1.852) / (Math.pow(140, 1.852) * Math.pow(diameter, 4.87)) : 0;
+  }
+
+  function buildDripNetwork(entryFeatures) {
+    const pipes = waterPipeSource.getFeatures();
+    pipes.forEach(function (pipe) { if (!pipe.get('pipeId')) pipe.set('pipeId', 'pipe-' + waterPipeSequence++); });
+    const byId = new Map();
+    const children = new Map();
+    pipes.forEach(function (pipe) { byId.set(pipe.get('pipeId'), pipe); children.set(pipe.get('pipeId'), []); });
+    pipes.forEach(function (pipe) {
+      const parentId = pipe.get('parentPipe');
+      if (parentId && children.has(parentId)) children.get(parentId).push(pipe);
+    });
+    const spacing = numberValue('drip-emitter-spacing', 1);
+    const nominalFlow = numberValue('drip-emitter-flow', 2);
+    const emittersByPipe = new Map();
+    pipes.forEach(function (pipe) {
+      const points = pipe.get('pipeRole') === 'dripline' ? pointsAlongPipe(pipe, spacing) : [];
+      emittersByPipe.set(pipe.get('pipeId'), points);
+    });
+    const countCache = new Map();
+    function downstreamEmitterCount(pipeId, trail) {
+      if (countCache.has(pipeId)) return countCache.get(pipeId);
+      if (trail.has(pipeId)) return 0;
+      const nextTrail = new Set(trail); nextTrail.add(pipeId);
+      let count = (emittersByPipe.get(pipeId) || []).length;
+      (children.get(pipeId) || []).forEach(function (child) { count += downstreamEmitterCount(child.get('pipeId'), nextTrail); });
+      countCache.set(pipeId, count);
+      return count;
+    }
+    const entryByNumber = new Map();
+    entryFeatures.forEach(function (entry) { entryByNumber.set(entry.get('entryNumber'), entry); });
+    const designHead = numberValue('drip-pressure', 1.2) * 10.197;
+    const pc = document.getElementById('drip-emitter-type').value === 'pc';
+    const emitters = [];
+    pipes.forEach(function (lateral) {
+      const points = emittersByPipe.get(lateral.get('pipeId')) || [];
+      points.forEach(function (point) {
+        const path = [];
+        let cursor = lateral; const visited = new Set();
+        while (cursor && !visited.has(cursor.get('pipeId'))) {
+          visited.add(cursor.get('pipeId')); path.unshift(cursor);
+          cursor = byId.get(cursor.get('parentPipe'));
+        }
+        let friction = 0;
+        path.forEach(function (pipe, pathIndex) {
+          const coordinates = pipe.getGeometry().getCoordinates();
+          let length = point.distance;
+          if (pipe !== lateral) {
+            const child = path[pathIndex + 1];
+            const savedDistance = child ? Number(child.get('parentDistance')) : NaN;
+            length = Number.isFinite(savedDistance) ? Math.max(0, Math.min(distanceMeters(coordinates), savedDistance)) : child ? distanceAlongCoordinates(coordinates, child.getGeometry().getFirstCoordinate()) : distanceMeters(coordinates);
+          }
+          friction += hazenWilliamsLoss(length, downstreamEmitterCount(pipe.get('pipeId'), new Set()) * nominalFlow, dripPipeDiameter(pipe.get('pipeRole')));
+        });
+        const entry = entryByNumber.get(lateral.get('entryNumber'));
+        const sourceElevation = entry ? elevationAtCoordinate(entry.getGeometry().getCoordinates()) : null;
+        const emitterElevation = elevationAtCoordinate(point.coordinate);
+        const elevationRise = sourceElevation !== null && emitterElevation !== null ? emitterElevation - sourceElevation : 0;
+        const pressureHead = Math.max(0, designHead - friction - elevationRise);
+        const pcMinimumHead = 7.14;
+        const pressureFactor = pc ? (pressureHead >= pcMinimumHead ? 1 : Math.sqrt(pressureHead / pcMinimumHead)) : Math.sqrt(pressureHead / Math.max(.1, designHead));
+        emitters.push({ coordinate: point.coordinate, pipe: lateral, pressureBar: pressureHead / 10.197, flowLh: nominalFlow * Math.max(0, pressureFactor), pressureDeficient: pc ? pressureHead < pcMinimumHead : pressureFactor < .95 });
+      });
+    });
+    const requiredFlow = emitters.reduce(function (sum, emitter) { return sum + emitter.flowLh; }, 0);
+    const capacity = numberValue('drip-capacity', 2000);
+    const capacityScale = requiredFlow > capacity ? capacity / requiredFlow : 1;
+    emitters.forEach(function (emitter) { emitter.flowLh *= capacityScale; });
+    const totalFlow = emitters.reduce(function (sum, emitter) { return sum + emitter.flowLh; }, 0);
+    const pressures = emitters.map(function (emitter) { return emitter.pressureBar; });
+    const flows = emitters.map(function (emitter) { return emitter.flowLh; }).sort(function (a, b) { return a - b; });
+    const lowCount = Math.max(1, Math.ceil(flows.length / 4));
+    const lowAverage = flows.slice(0, lowCount).reduce(function (sum, flow) { return sum + flow; }, 0) / lowCount;
+    const average = flows.length ? totalFlow / flows.length : 0;
+    return {
+      emitters: emitters,
+      totalFlowLh: totalFlow,
+      requiredFlowLh: requiredFlow,
+      capacityLimited: capacityScale < .999,
+      minPressureBar: pressures.length ? Math.min.apply(Math, pressures) : 0,
+      maxPressureBar: pressures.length ? Math.max.apply(Math, pressures) : 0,
+      lowPressureCount: emitters.filter(function (emitter) { return emitter.pressureDeficient; }).length,
+      uniformity: average ? lowAverage / average * 100 : 0,
+      pipeCount: pipes.length,
+      lateralCount: pipes.filter(function (pipe) { return pipe.get('pipeRole') === 'dripline'; }).length
+    };
+  }
+
+  function createDripWetting(grid, emitters, durationMinutes, radiusMeters) {
+    const wetting = new Float32Array(grid.size);
+    const arrivals = new Float32Array(grid.size); arrivals.fill(Infinity);
+    let maxDepth = 0;
+    emitters.forEach(function (emitter) {
+      const centerX = Math.max(0, Math.min(grid.width - 1, Math.floor((emitter.coordinate[0] - surveyExtent[0]) / (surveyExtent[2] - surveyExtent[0]) * grid.width)));
+      const centerY = Math.max(0, Math.min(grid.height - 1, Math.floor((surveyExtent[3] - emitter.coordinate[1]) / (surveyExtent[3] - surveyExtent[1]) * grid.height)));
+      const rx = Math.max(1, Math.ceil(radiusMeters / Math.max(.1, grid.cellWidth)));
+      const ry = Math.max(1, Math.ceil(radiusMeters / Math.max(.1, grid.cellHeight)));
+      const volumeLiters = emitter.flowLh * durationMinutes / 60;
+      const nominalDepth = volumeLiters / Math.max(.1, Math.PI * radiusMeters * radiusMeters);
+      for (let dy = -ry; dy <= ry; dy += 1) {
+        for (let dx = -rx; dx <= rx; dx += 1) {
+          const x = centerX + dx; const y = centerY + dy;
+          if (x < 0 || y < 0 || x >= grid.width || y >= grid.height) continue;
+          const index = y * grid.width + x;
+          if (!grid.valid[index]) continue;
+          const distance = Math.hypot(dx * grid.cellWidth, dy * grid.cellHeight);
+          if (distance > radiusMeters) continue;
+          const falloff = Math.max(.15, 1 - distance / radiusMeters);
+          wetting[index] += nominalDepth * falloff;
+          arrivals[index] = Math.min(arrivals[index], .03 + distance / radiusMeters * .35);
+          maxDepth = Math.max(maxDepth, wetting[index]);
+        }
+      }
+    });
+    return { wetting: wetting, arrivals: arrivals, maxDepthMm: maxDepth };
   }
 
   function renderWaterTimeline(progress) {
@@ -714,6 +978,20 @@
     waterSurfaceCanvas.height = grid.height;
     const context = waterSurfaceCanvas.getContext('2d');
     const image = context.createImageData(grid.width, grid.height);
+    if (state.wetting) {
+      for (let i = 0; i < grid.size; i += 1) {
+        if (!state.wetting[i]) continue;
+        const arrival = state.wettingArrivals[i];
+        if (!Number.isFinite(arrival) || progress <= arrival) continue;
+        const localProgress = Math.min(1, (progress - arrival) / Math.max(.001, 1 - arrival));
+        const depthStrength = Math.min(1, state.wetting[i] / Math.max(.1, state.maxWettingDepthMm));
+        const offset = i * 4;
+        image.data[offset] = 0;
+        image.data[offset + 1] = 220 + Math.round(35 * depthStrength);
+        image.data[offset + 2] = 110 + Math.round(50 * depthStrength);
+        image.data[offset + 3] = Math.round((120 + 120 * depthStrength) * Math.sqrt(localProgress));
+      }
+    }
     if (state.infiltrationSnapshots) {
       const infiltrationSnapshot = state.infiltrationSnapshots[Math.min(state.infiltrationSnapshots.length - 1, Math.round(progress * (state.infiltrationSnapshots.length - 1)))];
       for (let i = 0; i < grid.size; i += 1) {
@@ -725,19 +1003,6 @@
         image.data[offset + 1] = 205 + Math.round(50 * strength);
         image.data[offset + 2] = 115 + Math.round(35 * strength);
         image.data[offset + 3] = Math.round(55 + 125 * strength);
-      }
-    } else if (state.wetting) {
-      for (let i = 0; i < grid.size; i += 1) {
-        if (!state.wetting[i]) continue;
-        const arrival = state.wettingArrivals[i];
-        if (!Number.isFinite(arrival) || progress <= arrival) continue;
-        const localProgress = Math.min(1, (progress - arrival) / Math.max(.001, 1 - arrival));
-        const depthStrength = Math.min(1, state.wetting[i] / Math.max(.1, state.maxWettingDepthMm));
-        const offset = i * 4;
-        image.data[offset] = 0;
-        image.data[offset + 1] = 220 + Math.round(35 * depthStrength);
-        image.data[offset + 2] = 110 + Math.round(50 * depthStrength);
-        image.data[offset + 3] = Math.round((105 + 115 * depthStrength) * Math.sqrt(localProgress));
       }
     }
     const snapshot = state.snapshots[Math.min(state.snapshots.length - 1, Math.round(progress * (state.snapshots.length - 1)))];
@@ -811,6 +1076,7 @@
     waterSimulationState = null;
     waterSurfaceCanvas.width = 0; waterSurfaceCanvas.height = 0;
     waterSurfaceLayer.setVisible(false);
+    document.getElementById('water-low-pressure-key').hidden = true;
     if (waterPreviousTerrainOpacity !== null && waterBackgroundLayer) {
       waterBackgroundLayer.setOpacity(waterPreviousTerrainOpacity);
       document.getElementById('map-opacity').value = waterPreviousTerrainOpacity;
@@ -880,10 +1146,13 @@
   }
 
   function runIrrigationSimulation() {
+    document.querySelector('#water-demand-row dt').textContent = 'Zone demand';
+    ['water-drip-summary-row', 'water-uniformity-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
     const entries = waterEntrySource.getFeatures();
-    const flowPerEntry = numberValue('water-flow', 8);
+    const totalFlow = totalIrrigationFlow(entries.length);
+    const flowPerEntry = entries.length ? totalFlow / entries.length : flowLitersMinuteValue();
     const duration = numberValue('water-duration', 20);
-    const applied = entries.length * flowPerEntry * duration;
+    const applied = totalFlow * duration;
     const soil = greenAmptSoils[document.getElementById('water-soil').value] || greenAmptSoils.loam;
     waterResultSource.clear();
     clearWaterSurface();
@@ -892,7 +1161,7 @@
     const zoneArea = drawnArea || surveyAreaSquareMeters;
     const dailyDemand = zoneArea * numberValue('water-depth', 5);
     const designFlow = dailyDemand / (numberValue('water-hours', 6) * 60);
-    const hydraulicFlow = Math.max(designFlow, entries.length * flowPerEntry);
+    const hydraulicFlow = Math.max(designFlow, totalFlow);
     const pipe = pipeMetrics(hydraulicFlow, numberValue('water-diameter', 25));
     showSizingResults(zoneArea, designFlow, hydraulicFlow, pipe, dailyDemand);
     if (!entryCoordinates.length) {
@@ -905,9 +1174,25 @@
       document.getElementById('water-status').textContent = 'Sizing calculated. Add at least one water entry to run the hydraulic simulation.';
       return Promise.resolve();
     }
+    const connectedPipes = waterPipeSource.getFeatures();
+    const outlets = irrigationOutlets(entries);
+    if (connectedPipes.length) {
+      let maximumOutletFlow = 0;
+      outlets.forEach(function (outlet) { if (outlet.direction) maximumOutletFlow = Math.max(maximumOutletFlow, totalFlow * outlet.weight); });
+      const outletHydraulics = pipeMetrics(maximumOutletFlow, numberValue('water-diameter', 25));
+      if (outletHydraulics.velocity > 3) {
+        document.getElementById('water-applied').textContent = formatVolume(applied) + ' per run';
+        document.getElementById('water-infiltration').textContent = '—';
+        document.getElementById('water-runoff').textContent = '—';
+        document.getElementById('water-path').textContent = 'Pipe discharge exceeds safe test range';
+        document.getElementById('water-results').hidden = false;
+        document.getElementById('water-status').textContent = 'Pipe flow is ' + outletHydraulics.velocity.toFixed(1) + ' m/s. Reduce flow or increase the pipe to at least ' + recommendedPipe(maximumOutletFlow) + ' mm before simulating.';
+        return Promise.resolve();
+      }
+    }
     const grid = buildHydrologyGrid();
     document.getElementById('water-status').textContent = 'Running Green–Ampt infiltration and 2D diffusion-wave routing…';
-    return solveHydrology({ mode: 'irrigation', totalMinutes: duration, totalFlow: entries.length * flowPerEntry, sourceWeights: sourceWeightsFromEntries(grid, entryCoordinates), soil: soil }).then(function (solved) {
+    return solveHydrology({ mode: 'irrigation', totalMinutes: duration, totalFlow: totalFlow, sourceWeights: sourceWeightsFromOutlets(grid, outlets, totalFlow, numberValue('water-diameter', 25)), soil: soil }).then(function (solved) {
       const infiltrated = solved.infiltratedLiters;
       const runoff = Math.max(0, solved.appliedLiters - infiltrated);
       waterSimulationState = { mode: 'irrigation', totalMinutes: duration, grid: grid, snapshots: solved.snapshots, snapshotScale: solved.snapshotScale, maxPoolDepth: solved.maxDepth, infiltrationSnapshots: solved.infiltrationSnapshots, infiltrationSnapshotScale: solved.infiltrationSnapshotScale, maxInfiltrationDepth: solved.maxInfiltrationDepth };
@@ -919,7 +1204,86 @@
       document.getElementById('water-path').textContent = '2D diffusion wave · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm · ' + formatVolume(solved.outflowLiters) + ' left survey';
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-legend').hidden = false;
-      document.getElementById('water-status').textContent = 'Point outlets injected at entries · DTM-derived downhill routing · Green–Ampt infiltration + mass-conserving 2D diffusion wave.';
+      const allocation = document.getElementById('water-flow-basis').value === 'total' ? formatVolume(totalFlow) + '/min shared across ' + entries.length + ' entries and ' + outlets.length + ' terminal outlets' : formatVolume(flowPerEntry) + '/min per entry across ' + outlets.length + ' terminal outlets';
+      document.getElementById('water-status').textContent = allocation + ' · ' + (connectedPipes.length ? 'pipe endpoints discharge in the final segment direction; gravity and the DTM control subsequent flow.' : 'unpiped entries release locally; gravity and the DTM control flow in every direction.');
+    });
+  }
+
+  function runDripSimulation() {
+    document.querySelector('#water-demand-row dt').textContent = 'System demand';
+    const entries = waterEntrySource.getFeatures();
+    const duration = numberValue('drip-duration', 120);
+    const soil = greenAmptSoils[document.getElementById('water-soil').value] || greenAmptSoils.loam;
+    waterResultSource.clear();
+    clearWaterSurface();
+    ['water-pipe-result-row', 'water-demand-row', 'water-pump-row', 'water-solar-row', 'water-drip-summary-row', 'water-uniformity-row'].forEach(function (id) { document.getElementById(id).hidden = false; });
+    const invalidInput = document.querySelector('#water-drip-fields input:invalid');
+    if (invalidInput) {
+      invalidInput.reportValidity();
+      document.getElementById('water-results').hidden = true;
+      document.getElementById('water-status').textContent = invalidInput.id === 'drip-emitter-flow' ? 'Emitter flow is per outlet. Use 0.1–20 L/h; common drip emitters are about 1–4 L/h.' : 'Correct the highlighted drip-design value before simulating.';
+      return Promise.resolve();
+    }
+    if (!entries.length) {
+      document.getElementById('water-results').hidden = false;
+      document.getElementById('water-applied').textContent = '0 L per run';
+      document.getElementById('water-status').textContent = 'Add an entry, then connect mainline, submain and dripline pipes.';
+      return Promise.resolve();
+    }
+    const network = buildDripNetwork(entries);
+    document.getElementById('water-low-pressure-key').hidden = !network.lowPressureCount;
+    if (!network.emitters.length) {
+      document.getElementById('water-results').hidden = false;
+      document.getElementById('water-applied').textContent = '0 L per run';
+      document.getElementById('water-status').textContent = 'No emitters found. Draw at least one pipe with Drawing pipe type set to Dripline / lateral.';
+      return Promise.resolve();
+    }
+    network.emitters.forEach(function (emitter) {
+      const feature = new ol.Feature(new ol.geom.Point(emitter.coordinate));
+      feature.set('waterType', emitter.pressureDeficient ? 'emitter-low' : 'emitter');
+      feature.set('pressureBar', emitter.pressureBar);
+      feature.set('flowLh', emitter.flowLh);
+      if (emitter.pressureDeficient) feature.setStyle([
+        new ol.style.Style({ zIndex: 100, image: new ol.style.Circle({ radius: 8, fill: new ol.style.Fill({ color: '#fff' }) }) }),
+        new ol.style.Style({ zIndex: 101, image: new ol.style.Circle({ radius: 6, fill: new ol.style.Fill({ color: '#ff3b30' }) }), text: new ol.style.Text({ text: '!', font: 'bold 9px Arial', fill: new ol.style.Fill({ color: '#fff' }) }) })
+      ]);
+      waterResultSource.addFeature(feature);
+    });
+    waterResultLayer.setVisible(true);
+    const grid = buildHydrologyGrid();
+    const sourceOutlets = network.emitters.map(function (emitter) { return { coordinate: emitter.coordinate, direction: null, weight: emitter.flowLh / Math.max(.0001, network.totalFlowLh) }; });
+    const wetting = createDripWetting(grid, network.emitters, duration, numberValue('drip-wetting-radius', .7));
+    document.getElementById('water-status').textContent = 'Calculating emitter pressure, wetting and terrain runoff…';
+    return solveHydrology({ mode: 'irrigation', totalMinutes: duration, totalFlow: network.totalFlowLh / 60, sourceWeights: sourceWeightsFromOutlets(grid, sourceOutlets, network.totalFlowLh / 60, numberValue('drip-lateral-diameter', 16)), soil: soil }).then(function (solved) {
+      const infiltrated = solved.infiltratedLiters;
+      const runoff = Math.max(0, solved.appliedLiters - infiltrated);
+      waterSimulationState = { mode: 'drip', totalMinutes: duration, grid: grid, snapshots: solved.snapshots, snapshotScale: solved.snapshotScale, maxPoolDepth: solved.maxDepth, infiltrationSnapshots: solved.infiltrationSnapshots, infiltrationSnapshotScale: solved.infiltrationSnapshotScale, maxInfiltrationDepth: solved.maxInfiltrationDepth, wetting: wetting.wetting, wettingArrivals: wetting.arrivals, maxWettingDepthMm: wetting.maxDepthMm };
+      document.getElementById('water-timeline').hidden = false;
+      setWaterTimeline(0); playWaterTimeline();
+      document.getElementById('water-applied').textContent = formatVolume(solved.appliedLiters) + ' per run';
+      document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(infiltrated / Math.max(1, solved.appliedLiters) * 100) + '%)';
+      document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round(runoff / Math.max(1, solved.appliedLiters) * 100) + '%)';
+      document.getElementById('water-path').textContent = network.minPressureBar.toFixed(2) + '–' + network.maxPressureBar.toFixed(2) + ' bar at emitters · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm';
+      const roleLengths = { mainline: 0, submain: 0, dripline: 0 };
+      waterPipeSource.getFeatures().forEach(function (pipe) { const role = pipe.get('pipeRole'); if (roleLengths[role] !== undefined) roleLengths[role] += distanceMeters(pipe.getGeometry().getCoordinates()); });
+      document.getElementById('water-pipe-result').textContent = roleLengths.mainline.toFixed(0) + ' m main · ' + roleLengths.submain.toFixed(0) + ' m submain · ' + roleLengths.dripline.toFixed(0) + ' m dripline';
+      document.getElementById('water-demand').textContent = network.totalFlowLh.toFixed(0) + ' L/h · ' + formatVolume(solved.appliedLiters) + ' per ' + duration + ' min run';
+      const head = numberValue('drip-pressure', 1.2) * 10.197 + numberValue('drip-source-lift', 0);
+      const efficiency = numberValue('drip-pump-efficiency', 65) / 100;
+      const pumpKw = 1000 * 9.81 * (network.totalFlowLh / 3600000) * head / Math.max(.2, efficiency) / 1000;
+      const runEnergy = pumpKw * duration / 60;
+      const solarKwp = runEnergy / (numberValue('drip-solar-hours', 5) * .75);
+      document.getElementById('water-pump').textContent = pumpKw.toFixed(2) + ' kW / ' + (pumpKw * 1.341).toFixed(2) + ' hp · ' + head.toFixed(1) + ' m head';
+      document.getElementById('water-solar').textContent = solarKwp.toFixed(2) + ' kWp per daily run · about ' + Math.ceil(solarKwp / .55) + ' × 550 W panels';
+      document.getElementById('water-drip-summary').textContent = network.emitters.length + ' emitters on ' + network.lateralCount + ' lateral' + (network.lateralCount === 1 ? '' : 's') + ' · ' + network.totalFlowLh.toFixed(0) + ' L/h' + (network.lowPressureCount ? ' · ' + network.lowPressureCount + ' low pressure' : '') + (network.capacityLimited ? ' (source-limited)' : '');
+      document.getElementById('water-uniformity').textContent = network.uniformity.toFixed(1) + '% low-quarter EU · ' + (document.getElementById('drip-emitter-type').value === 'pc' ? 'pressure compensating' : 'non-compensating');
+      document.getElementById('water-results').hidden = false;
+      document.getElementById('water-legend').hidden = false;
+      const warnings = [];
+      if (network.capacityLimited) warnings.push('source capacity limits emitter flow');
+      if (network.uniformity < 90) warnings.push('emission uniformity is below 90%');
+      if (network.lowPressureCount) warnings.push(network.lowPressureCount + ' emitter' + (network.lowPressureCount === 1 ? ' is' : 's are') + ' below required pressure (marked red)');
+      document.getElementById('water-status').textContent = warnings.length ? 'Drip design warning: ' + warnings.join('; ') + '.' : 'Drip network simulated: pressure, emitter discharge, infiltration and localized wetting are within the configured limits.';
     });
   }
 
@@ -930,7 +1294,7 @@
     const rainDepth = intensity * duration / 60;
     waterResultSource.clear();
     clearWaterSurface();
-    ['water-pipe-result-row', 'water-demand-row', 'water-pump-row', 'water-solar-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
+    ['water-pipe-result-row', 'water-demand-row', 'water-pump-row', 'water-solar-row', 'water-drip-summary-row', 'water-uniformity-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
     document.getElementById('water-status').textContent = 'Running Green–Ampt infiltration and 2D diffusion-wave routing…';
     return solveHydrology({ mode: 'rain', totalMinutes: duration, rainIntensity: intensity, soil: soil }).then(function (solved) {
       const infiltrated = solved.infiltratedLiters;
@@ -956,7 +1320,8 @@
     runButton.disabled = true;
     ensureDtm().then(function (ready) {
       if (!ready) throw new Error('Terrain data could not be loaded.');
-      return document.getElementById('water-mode').value === 'rain' ? runRainSimulation() : runIrrigationSimulation();
+      const mode = document.getElementById('water-mode').value;
+      return mode === 'rain' ? runRainSimulation() : mode === 'drip' ? runDripSimulation() : runIrrigationSimulation();
     }).catch(function (error) {
       status.textContent = 'Simulation failed: ' + error.message;
     }).then(function () { runButton.disabled = false; });
@@ -965,33 +1330,193 @@
   function startWaterDraw(kind) {
     stopDrawing(); stopWaterTools();
     const isPipe = kind === 'pipe';
+    if (isPipe && !waterEntrySource.getFeatures().length) {
+      document.getElementById('water-status').textContent = 'Add a water entry first, then draw a pipe with either endpoint touching its yellow marker.';
+      return;
+    }
     const button = document.getElementById(isPipe ? 'water-pipe' : 'water-zone');
     button.classList.add('active');
     waterTool = kind;
     waterDraw = new ol.interaction.Draw({ source: isPipe ? waterPipeSource : waterZoneSource, type: isPipe ? 'LineString' : 'Polygon' });
     map.addInteraction(waterDraw);
-    document.getElementById('water-status').textContent = isPipe ? 'Click along the pipe route; double-click to finish.' : 'Draw the watering zone; click the first point to close.';
+    if (isPipe) {
+      waterSnapFeatures = new ol.Collection(waterEntrySource.getFeatures().concat(waterPipeSource.getFeatures()));
+      waterSnap = new ol.interaction.Snap({ features: waterSnapFeatures, pixelTolerance: 24 });
+      map.addInteraction(waterSnap);
+    }
+    document.getElementById('water-status').textContent = isPipe ? 'Draw from or toward a yellow ENTRY marker or existing pipe, then double-click. Either direction connects.' : 'Draw the watering zone; click the first point to close.';
     waterDraw.on('drawend', function (event) {
       event.feature.set('waterType', kind);
-      window.setTimeout(stopWaterTools, 0);
-      document.getElementById('water-status').textContent = isPipe ? 'Pipe route added. Add more or simulate.' : 'Watering zone added. Simulate to size the system.';
+      if (isPipe) {
+        event.feature.set('pipeRole', document.getElementById('water-mode').value === 'drip' ? document.getElementById('drip-pipe-role').value : 'delivery');
+        event.feature.set('pipeId', 'pipe-' + waterPipeSequence++);
+        const geometry = event.feature.getGeometry();
+        let coordinates = geometry.getCoordinates();
+        let nearestEntry = null; let nearestPipe = null; let nearestCoordinate = null; let nearestDistance = Infinity;
+        let reversePipe = false;
+        [0, coordinates.length - 1].forEach(function (endpointIndex) {
+          const endpoint = coordinates[endpointIndex];
+          waterEntrySource.getFeatures().forEach(function (entry) {
+            const distance = distanceMeters([entry.getGeometry().getCoordinates(), endpoint]);
+            if (distance < nearestDistance) { nearestEntry = entry; nearestPipe = null; nearestCoordinate = entry.getGeometry().getCoordinates(); nearestDistance = distance; reversePipe = endpointIndex !== 0; }
+          });
+          waterPipeSource.getFeatures().forEach(function (pipeFeature) {
+            if (pipeFeature === event.feature) return;
+            const closest = pipeFeature.getGeometry().getClosestPoint(endpoint);
+            const distance = distanceMeters([closest, endpoint]);
+            if (distance < nearestDistance) { nearestEntry = null; nearestPipe = pipeFeature; nearestCoordinate = closest; nearestDistance = distance; reversePipe = endpointIndex !== 0; }
+          });
+        });
+        if ((!nearestEntry && !nearestPipe) || nearestDistance > 8) {
+          waterPipeSource.removeFeature(event.feature);
+          document.getElementById('water-status').textContent = 'Pipe not added: one endpoint must touch an ENTRY marker or existing pipe. Continuous drawing is still active—try again.';
+          return;
+        }
+        if (reversePipe) coordinates = coordinates.slice().reverse();
+        coordinates[0] = nearestCoordinate.slice();
+        geometry.setCoordinates(coordinates);
+        event.feature.set('entryNumber', nearestEntry ? nearestEntry.get('entryNumber') : nearestPipe.get('entryNumber'));
+        if (nearestPipe) {
+          event.feature.set('parentPipe', nearestPipe.get('pipeId'));
+          event.feature.set('parentDistance', distanceAlongCoordinates(nearestPipe.getGeometry().getCoordinates(), nearestCoordinate));
+        }
+        if (waterSnapFeatures) waterSnapFeatures.push(event.feature);
+      }
+      if (!isPipe) window.setTimeout(stopWaterTools, 0);
+      document.getElementById('water-status').textContent = isPipe ? (document.getElementById('water-mode').value === 'drip' ? 'Pipe connected. Draw pipe remains active; keep drawing or change the pipe type.' : 'Pipe connected. Draw pipe remains active for more branches.') : 'Watering zone added. Simulate to size the system.';
+      window.setTimeout(autoSaveWaterPlan, 0);
     });
+  }
+
+  const waterPlanStorageKey = 'halil-cevizlik-water-plan-v1';
+  const waterPlanSettingIds = [
+    'water-mode', 'water-soil', 'water-flow', 'water-flow-unit', 'water-flow-basis', 'water-duration', 'water-diameter', 'water-pressure', 'water-source-lift', 'water-depth', 'water-hours', 'pump-efficiency', 'solar-hours',
+    'rain-intensity', 'rain-duration', 'drip-pipe-role', 'drip-main-diameter', 'drip-submain-diameter', 'drip-lateral-diameter', 'drip-emitter-spacing', 'drip-emitter-flow', 'drip-emitter-type', 'drip-pressure', 'drip-capacity', 'drip-source-lift', 'drip-pump-efficiency', 'drip-solar-hours', 'drip-duration', 'drip-wetting-radius', 'water-opacity'
+  ];
+  const waterPlanGeoJson = new ol.format.GeoJSON();
+  let restoringWaterPlan = false;
+
+  function waterSourceGeoJson(source) {
+    return waterPlanGeoJson.writeFeaturesObject(source.getFeatures(), { dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' });
+  }
+
+  function captureWaterPlan() {
+    const settings = {};
+    waterPlanSettingIds.forEach(function (id) {
+      const element = document.getElementById(id);
+      if (element) settings[id] = element.value;
+    });
+    return {
+      format: 'agonyam-water-plan',
+      version: 1,
+      savedAt: new Date().toISOString(),
+      settings: settings,
+      entries: waterSourceGeoJson(waterEntrySource),
+      pipes: waterSourceGeoJson(waterPipeSource),
+      zones: waterSourceGeoJson(waterZoneSource)
+    };
+  }
+
+  function autoSaveWaterPlan() {
+    if (restoringWaterPlan) return;
+    try { localStorage.setItem(waterPlanStorageKey, JSON.stringify(captureWaterPlan())); } catch (error) {}
+  }
+
+  function applyWaterPlan(plan, message) {
+    if (!plan || plan.format !== 'agonyam-water-plan' || plan.version !== 1) throw new Error('Unsupported plan file.');
+    restoringWaterPlan = true;
+    stopWaterTools();
+    waterEntrySource.clear(); waterPipeSource.clear(); waterZoneSource.clear(); waterResultSource.clear();
+    clearWaterEntryOverlays(); clearWaterSurface();
+    Object.keys(plan.settings || {}).forEach(function (id) {
+      const element = document.getElementById(id);
+      if (element) element.value = plan.settings[id];
+    });
+    updateWaterMode();
+    const readOptions = { dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' };
+    waterEntrySource.addFeatures(waterPlanGeoJson.readFeatures(plan.entries || { type: 'FeatureCollection', features: [] }, readOptions));
+    waterPipeSource.addFeatures(waterPlanGeoJson.readFeatures(plan.pipes || { type: 'FeatureCollection', features: [] }, readOptions));
+    waterZoneSource.addFeatures(waterPlanGeoJson.readFeatures(plan.zones || { type: 'FeatureCollection', features: [] }, readOptions));
+    waterEntrySource.getFeatures().forEach(addWaterEntryOverlay);
+    waterPipeSequence = 1;
+    waterPipeSource.getFeatures().forEach(function (pipe) {
+      const match = String(pipe.get('pipeId') || '').match(/(\d+)$/);
+      if (match) waterPipeSequence = Math.max(waterPipeSequence, Number(match[1]) + 1);
+    });
+    document.getElementById('water-opacity-value').textContent = Math.round(Number(document.getElementById('water-opacity').value) * 100) + '%';
+    restoringWaterPlan = false;
+    autoSaveWaterPlan();
+    const extent = ol.extent.createEmpty();
+    [waterEntrySource, waterPipeSource, waterZoneSource].forEach(function (source) {
+      if (source.getFeatures().length) ol.extent.extend(extent, source.getExtent());
+    });
+    if (!ol.extent.isEmpty(extent)) map.getView().fit(extent, map.getSize(), { padding: [70, 350, 70, 70], maxZoom: 21 });
+    document.getElementById('water-status').textContent = message || 'Plan loaded. Run Simulate to recalculate results.';
+  }
+
+  function restoreAutoSavedWaterPlan() {
+    try {
+      const saved = localStorage.getItem(waterPlanStorageKey);
+      if (!saved) return false;
+      applyWaterPlan(JSON.parse(saved), 'Autosaved plan restored. Run Simulate to recalculate results.');
+      return true;
+    } catch (error) {
+      localStorage.removeItem(waterPlanStorageKey);
+      return false;
+    }
+  }
+
+  function downloadWaterPlan() {
+    const plan = captureWaterPlan();
+    autoSaveWaterPlan();
+    const blob = new Blob([JSON.stringify(plan, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'akcakoyun-irrigation-plan-' + new Date().toISOString().slice(0, 10) + '.json';
+    document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    document.getElementById('water-status').textContent = 'Plan saved to a JSON file and autosaved in this browser.';
   }
 
   function updateWaterMode() {
     stopWaterTools();
-    const rain = document.getElementById('water-mode').value === 'rain';
+    const mode = document.getElementById('water-mode').value;
+    const rain = mode === 'rain';
+    const drip = mode === 'drip';
     waterResultSource.clear();
     clearWaterSurface();
     document.getElementById('water-results').hidden = true;
     document.getElementById('water-legend').hidden = true;
-    document.getElementById('water-irrigation-fields').hidden = rain;
+    document.getElementById('water-irrigation-fields').hidden = rain || drip;
     document.getElementById('water-rain-fields').hidden = !rain;
-    ['water-place', 'water-pipe', 'water-zone'].forEach(function (id) { document.getElementById(id).hidden = rain; });
-    document.getElementById('water-status').textContent = rain ? 'Set the rain event and simulate terrain runoff.' : 'Add entry points and pipe routes, or draw a watering zone.';
+    document.getElementById('water-drip-fields').hidden = !drip;
+    ['water-place', 'water-pipe', 'water-erase', 'water-zone'].forEach(function (id) { document.getElementById(id).hidden = rain; });
+    ['water-drip-summary-row', 'water-uniformity-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
+    document.getElementById('water-status').textContent = rain ? 'Set the rain event and simulate terrain runoff.' : drip ? 'Add an entry, then draw mainline, submain and dripline pipes.' : 'Add entry points and pipe routes, or draw a watering zone.';
   }
 
   document.getElementById('water-mode').addEventListener('change', updateWaterMode);
+  waterPlanSettingIds.forEach(function (id) {
+    const element = document.getElementById(id);
+    if (element) {
+      element.addEventListener('input', autoSaveWaterPlan);
+      element.addEventListener('change', autoSaveWaterPlan);
+    }
+  });
+  document.getElementById('water-save').addEventListener('click', downloadWaterPlan);
+  document.getElementById('water-load').addEventListener('click', function () { document.getElementById('water-plan-file').click(); });
+  document.getElementById('water-plan-file').addEventListener('change', function (event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function () {
+      try { applyWaterPlan(JSON.parse(reader.result), 'Plan loaded and autosaved. Run Simulate to recalculate results.'); }
+      catch (error) { document.getElementById('water-status').textContent = 'Plan could not be loaded: ' + error.message; }
+      event.target.value = '';
+    };
+    reader.readAsText(file);
+  });
   document.getElementById('water-place').addEventListener('click', function () {
     if (waterTool === 'entry') {
       stopWaterTools();
@@ -1005,7 +1530,22 @@
     map.getTargetElement().style.cursor = 'crosshair';
     document.getElementById('water-status').textContent = 'Click the map to add water entry points; click the button again to finish.';
   });
-  document.getElementById('water-pipe').addEventListener('click', function () { startWaterDraw('pipe'); });
+  document.getElementById('water-pipe').addEventListener('click', function () {
+    if (waterTool === 'pipe') {
+      stopWaterTools();
+      document.getElementById('water-status').textContent = 'Pipe drawing finished. Simulate now or select Draw pipe to add more.';
+      return;
+    }
+    startWaterDraw('pipe');
+  });
+  document.getElementById('water-erase').addEventListener('click', function () {
+    if (waterTool === 'erase') { stopWaterTools(); document.getElementById('water-status').textContent = 'Pipe eraser closed.'; return; }
+    stopDrawing(); stopWaterTools();
+    waterTool = 'erase';
+    document.getElementById('water-erase').classList.add('active');
+    map.getTargetElement().style.cursor = 'crosshair';
+    document.getElementById('water-status').textContent = 'Click a pipe to remove it and any downstream branches.';
+  });
   document.getElementById('water-zone').addEventListener('click', function () { startWaterDraw('zone'); });
   document.getElementById('water-run').addEventListener('click', simulateWater);
   document.getElementById('water-opacity').addEventListener('input', function (event) {
@@ -1021,19 +1561,43 @@
   document.getElementById('water-clear').addEventListener('click', function () {
     stopWaterTools();
     waterEntrySource.clear(); waterPipeSource.clear(); waterZoneSource.clear(); waterResultSource.clear();
+    clearWaterEntryOverlays();
     clearWaterSurface();
     document.getElementById('water-legend').hidden = true;
     document.getElementById('water-results').hidden = true;
+    localStorage.removeItem(waterPlanStorageKey);
     document.getElementById('water-status').textContent = 'Plan cleared. Add entry points and pipe routes, or choose rainfall.';
   });
   map.on('singleclick', function (event) {
+    if (waterTool === 'erase') {
+      const pipe = map.forEachFeatureAtPixel(event.pixel, function (feature, layer) { return layer === waterPipeLayer ? feature : null; }, { hitTolerance: 8 });
+      if (!pipe) { document.getElementById('water-status').textContent = 'No pipe selected. Click directly on a pipe segment.'; return; }
+      const removeIds = new Set([pipe.get('pipeId')]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        waterPipeSource.getFeatures().forEach(function (candidate) {
+          if (removeIds.has(candidate.get('parentPipe')) && !removeIds.has(candidate.get('pipeId'))) { removeIds.add(candidate.get('pipeId')); changed = true; }
+        });
+      }
+      const removed = waterPipeSource.getFeatures().filter(function (candidate) { return removeIds.has(candidate.get('pipeId')); });
+      removed.forEach(function (candidate) { waterPipeSource.removeFeature(candidate); });
+      clearWaterSurface();
+      document.getElementById('water-results').hidden = true;
+      document.getElementById('water-legend').hidden = true;
+      autoSaveWaterPlan();
+      document.getElementById('water-status').textContent = removed.length + ' pipe segment' + (removed.length === 1 ? '' : 's') + ' removed.';
+      return;
+    }
     if (waterTool !== 'entry') return;
     const feature = new ol.Feature(new ol.geom.Point(event.coordinate));
     feature.set('entryNumber', waterEntrySource.getFeatures().length + 1);
     waterEntrySource.addFeature(feature);
+    addWaterEntryOverlay(feature);
+    autoSaveWaterPlan();
     document.getElementById('water-status').textContent = waterEntrySource.getFeatures().length + ' water entr' + (waterEntrySource.getFeatures().length === 1 ? 'y' : 'ies') + ' added.';
   });
-  updateWaterMode();
+  if (!restoreAutoSavedWaterPlan()) updateWaterMode();
 
   function refreshQuickButtons() {
     document.querySelectorAll('[data-map-quick]').forEach(function (button) {
