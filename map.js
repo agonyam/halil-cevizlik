@@ -176,6 +176,10 @@
         image: new ol.style.Circle({ radius: 6, fill: new ol.style.Fill({ color: '#ff3b30' }), stroke: new ol.style.Stroke({ color: '#fff', width: 2 }) }),
         text: new ol.style.Text({ text: '!', font: 'bold 9px Arial', fill: new ol.style.Fill({ color: '#fff' }) })
       });
+      if (type === 'emitter-underflow') return new ol.style.Style({
+        zIndex: 99,
+        image: new ol.style.Circle({ radius: 3.5, fill: new ol.style.Fill({ color: '#ff9f0a' }), stroke: new ol.style.Stroke({ color: '#4a2a00', width: 1 }) })
+      });
       if (type === 'emitter') return new ol.style.Style({ image: new ol.style.Circle({ radius: 4, fill: new ol.style.Fill({ color: '#52ffd2' }), stroke: new ol.style.Stroke({ color: '#fff', width: 1.5 }) }) });
       if (type === 'wetting') return new ol.style.Style({ fill: new ol.style.Fill({ color: 'rgba(0, 111, 255, .3)' }), stroke: new ol.style.Stroke({ color: '#dff8ff', width: 3 }) });
       if (type === 'pool') return new ol.style.Style({
@@ -946,7 +950,11 @@
     const capacityLimited = capacityRatio < .999;
     const severelyCapacityLimited = capacityRatio < .9;
     const deliveryScale = capacityLimited ? Math.min(1, capacity / Math.max(.001, predictedFlow)) : 1;
-    emitters.forEach(function (emitter) { emitter.flowLh *= deliveryScale; });
+    emitters.forEach(function (emitter) {
+      emitter.flowLh *= deliveryScale;
+      emitter.flowDeficient = emitter.flowLh < nominalFlow * .995;
+      emitter.targetFlowLh = nominalFlow;
+    });
     const totalFlow = predictedFlow * deliveryScale;
     const pressures = emitters.map(function (emitter) { return emitter.pressureBar; });
     const flows = emitters.map(function (emitter) { return emitter.flowLh; }).sort(function (a, b) { return a - b; });
@@ -966,6 +974,9 @@
       minPressureBar: pressures.length ? Math.min.apply(Math, pressures) : 0,
       maxPressureBar: pressures.length ? Math.max.apply(Math, pressures) : 0,
       lowPressureCount: emitters.filter(function (emitter) { return emitter.pressureDeficient; }).length,
+      lowFlowCount: emitters.filter(function (emitter) { return emitter.flowDeficient; }).length,
+      averageDeliveredFlowLh: emitters.length ? totalFlow / emitters.length : 0,
+      targetEmitterFlowLh: nominalFlow,
       uniformity: average ? lowAverage / average * 100 : 0,
       pipeCount: pipes.length,
       lateralCount: pipes.filter(function (pipe) { return pipe.get('pipeRole') === 'dripline'; }).length
@@ -1108,6 +1119,7 @@
     waterSurfaceCanvas.width = 0; waterSurfaceCanvas.height = 0;
     waterSurfaceLayer.setVisible(false);
     document.getElementById('water-low-pressure-key').hidden = true;
+    document.getElementById('water-low-flow-key').hidden = true;
     if (waterPreviousTerrainOpacity !== null && waterBackgroundLayer) {
       waterBackgroundLayer.setOpacity(waterPreviousTerrainOpacity);
       document.getElementById('map-opacity').value = waterPreviousTerrainOpacity;
@@ -1263,6 +1275,7 @@
     }
     const network = buildDripNetwork(entries);
     document.getElementById('water-low-pressure-key').hidden = !network.lowPressureCount;
+    document.getElementById('water-low-flow-key').hidden = !network.lowFlowCount;
     if (!network.emitters.length) {
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-applied').textContent = '0 L per run';
@@ -1283,6 +1296,7 @@
     if (network.severelyCapacityLimited) {
       const supported = Math.min(network.emitters.length, network.maximumSupportedEmitters);
       document.getElementById('water-low-pressure-key').hidden = true;
+      document.getElementById('water-low-flow-key').hidden = true;
       document.getElementById('water-applied').textContent = 'Not simulated — hydraulically infeasible';
       document.getElementById('water-infiltration').textContent = 'Not available';
       document.getElementById('water-runoff').textContent = 'Not available';
@@ -1296,9 +1310,10 @@
     }
     network.emitters.forEach(function (emitter) {
       const feature = new ol.Feature(new ol.geom.Point(emitter.coordinate));
-      feature.set('waterType', emitter.pressureDeficient ? 'emitter-low' : 'emitter');
+      feature.set('waterType', emitter.pressureDeficient ? 'emitter-low' : emitter.flowDeficient ? 'emitter-underflow' : 'emitter');
       feature.set('pressureBar', emitter.pressureBar);
       feature.set('flowLh', emitter.flowLh);
+      feature.set('targetFlowLh', emitter.targetFlowLh);
       if (emitter.pressureDeficient) feature.setStyle([
         new ol.style.Style({ zIndex: 100, image: new ol.style.Circle({ radius: 8, fill: new ol.style.Fill({ color: '#fff' }) }) }),
         new ol.style.Style({ zIndex: 101, image: new ol.style.Circle({ radius: 6, fill: new ol.style.Fill({ color: '#ff3b30' }) }), text: new ol.style.Text({ text: '!', font: 'bold 9px Arial', fill: new ol.style.Fill({ color: '#fff' }) }) })
@@ -1320,7 +1335,7 @@
       document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(infiltrated / Math.max(1, solved.appliedLiters) * 100) + '%)';
       document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round(runoff / Math.max(1, solved.appliedLiters) * 100) + '%)';
       document.getElementById('water-path').textContent = network.capacityLimited ? 'Capacity-limited approximation · verify operating pressure with the pump and emitter curves' : network.minPressureBar.toFixed(2) + '–' + network.maxPressureBar.toFixed(2) + ' bar at emitters · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm';
-      document.getElementById('water-drip-summary').textContent = network.emitters.length + ' emitters on ' + network.lateralCount + ' lateral' + (network.lateralCount === 1 ? '' : 's') + ' · ' + network.totalFlowLh.toFixed(0) + ' L/h delivered' + (network.capacityLimited ? ' · evenly capped estimate' : '') + (network.lowPressureCount ? ' · ' + network.lowPressureCount + ' low pressure' : '');
+      document.getElementById('water-drip-summary').textContent = network.emitters.length + ' emitters on ' + network.lateralCount + ' lateral' + (network.lateralCount === 1 ? '' : 's') + ' · ' + network.totalFlowLh.toFixed(0) + ' L/h delivered' + (network.lowFlowCount ? ' · ' + network.lowFlowCount + ' below target (' + network.averageDeliveredFlowLh.toFixed(2) + ' / ' + network.targetEmitterFlowLh.toFixed(2) + ' L/h avg)' : '') + (network.lowPressureCount ? ' · ' + network.lowPressureCount + ' low pressure' : '');
       document.getElementById('water-uniformity').textContent = network.capacityLimited ? 'Not validated — capped flow is distributed evenly for this planning preview' : network.uniformity.toFixed(1) + '% modeled hydraulic EU · ideal ' + (document.getElementById('drip-emitter-type').value === 'pc' ? 'pressure-compensating' : 'non-compensating') + ' emitters; field EU will be lower';
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-legend').hidden = false;
