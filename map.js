@@ -944,7 +944,10 @@
     const capacity = numberValue('drip-capacity', 2000);
     const capacityRatio = requiredFlow ? Math.min(1, capacity / requiredFlow) : 1;
     const capacityLimited = capacityRatio < .999;
-    const totalFlow = predictedFlow;
+    const severelyCapacityLimited = capacityRatio < .9;
+    const deliveryScale = capacityLimited ? Math.min(1, capacity / Math.max(.001, predictedFlow)) : 1;
+    emitters.forEach(function (emitter) { emitter.flowLh *= deliveryScale; });
+    const totalFlow = predictedFlow * deliveryScale;
     const pressures = emitters.map(function (emitter) { return emitter.pressureBar; });
     const flows = emitters.map(function (emitter) { return emitter.flowLh; }).sort(function (a, b) { return a - b; });
     const lowCount = Math.max(1, Math.ceil(flows.length / 4));
@@ -957,6 +960,7 @@
       availableFlowLh: capacity,
       capacityRatio: capacityRatio,
       capacityLimited: capacityLimited,
+      severelyCapacityLimited: severelyCapacityLimited,
       maximumSupportedEmitters: Math.floor(capacity / nominalFlow),
       zonesRequired: capacityLimited ? Math.ceil(requiredFlow / capacity) : 1,
       minPressureBar: pressures.length ? Math.min.apply(Math, pressures) : 0,
@@ -1276,7 +1280,7 @@
     document.getElementById('water-demand').textContent = network.requiredFlowLh.toFixed(0) + ' L/h required · ' + network.availableFlowLh.toFixed(0) + ' L/h available' + (network.capacityLimited ? ' (' + (network.capacityRatio * 100).toFixed(1) + '%)' : '');
     document.getElementById('water-pump').textContent = pumpKw.toFixed(2) + ' kW hydraulic minimum · ' + network.requiredFlowLh.toFixed(0) + ' L/h at ' + head.toFixed(1) + ' m head';
     document.getElementById('water-solar').textContent = solarKwp.toFixed(2) + ' kWp minimum run energy · size from the selected pump and controller';
-    if (network.capacityLimited) {
+    if (network.severelyCapacityLimited) {
       const supported = Math.min(network.emitters.length, network.maximumSupportedEmitters);
       document.getElementById('water-low-pressure-key').hidden = true;
       document.getElementById('water-applied').textContent = 'Not simulated — hydraulically infeasible';
@@ -1315,12 +1319,13 @@
       document.getElementById('water-applied').textContent = formatVolume(solved.appliedLiters) + ' per run';
       document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(infiltrated / Math.max(1, solved.appliedLiters) * 100) + '%)';
       document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round(runoff / Math.max(1, solved.appliedLiters) * 100) + '%)';
-      document.getElementById('water-path').textContent = network.minPressureBar.toFixed(2) + '–' + network.maxPressureBar.toFixed(2) + ' bar at emitters · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm';
-      document.getElementById('water-drip-summary').textContent = network.emitters.length + ' emitters on ' + network.lateralCount + ' lateral' + (network.lateralCount === 1 ? '' : 's') + ' · ' + network.totalFlowLh.toFixed(0) + ' L/h delivered' + (network.lowPressureCount ? ' · ' + network.lowPressureCount + ' low pressure' : '');
-      document.getElementById('water-uniformity').textContent = network.uniformity.toFixed(1) + '% modeled hydraulic EU · ideal ' + (document.getElementById('drip-emitter-type').value === 'pc' ? 'pressure-compensating' : 'non-compensating') + ' emitters; field EU will be lower';
+      document.getElementById('water-path').textContent = network.capacityLimited ? 'Capacity-limited approximation · verify operating pressure with the pump and emitter curves' : network.minPressureBar.toFixed(2) + '–' + network.maxPressureBar.toFixed(2) + ' bar at emitters · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm';
+      document.getElementById('water-drip-summary').textContent = network.emitters.length + ' emitters on ' + network.lateralCount + ' lateral' + (network.lateralCount === 1 ? '' : 's') + ' · ' + network.totalFlowLh.toFixed(0) + ' L/h delivered' + (network.capacityLimited ? ' · evenly capped estimate' : '') + (network.lowPressureCount ? ' · ' + network.lowPressureCount + ' low pressure' : '');
+      document.getElementById('water-uniformity').textContent = network.capacityLimited ? 'Not validated — capped flow is distributed evenly for this planning preview' : network.uniformity.toFixed(1) + '% modeled hydraulic EU · ideal ' + (document.getElementById('drip-emitter-type').value === 'pc' ? 'pressure-compensating' : 'non-compensating') + ' emitters; field EU will be lower';
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-legend').hidden = false;
       const warnings = [];
+      if (network.capacityLimited) warnings.push('source capacity is ' + (network.capacityRatio * 100).toFixed(1) + '% of demand; wetting uses an evenly capped-flow approximation and pressure is not validated');
       if (network.uniformity < 90) warnings.push('emission uniformity is below 90%');
       if (network.lowPressureCount) warnings.push(network.lowPressureCount + ' emitter' + (network.lowPressureCount === 1 ? ' is' : 's are') + ' below required pressure (marked red)');
       document.getElementById('water-status').textContent = warnings.length ? 'Drip design warning: ' + warnings.join('; ') + '.' : 'Drip network simulated: pressure, emitter discharge, infiltration and localized wetting are within the configured limits.';
