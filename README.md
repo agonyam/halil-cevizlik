@@ -1,6 +1,6 @@
-# Akçakoyun WebODM Survey Viewer
+# Agonyam WebODM Survey Viewers
 
-Static GitHub Pages reconstruction of the WebODM 2D and 3D viewers for the survey captured on 23 August 2026. It requires no WebODM login or application backend.
+Static GitHub Pages reconstructions of the WebODM 2D and 3D viewers. They require no WebODM login or application backend.
 
 The 3D view uses the original WebODM Potree interface, the complete 39.9-million-point EPT cloud, the Hires textured model, camera positions, measurements, clipping, navigation, projection, filters, and scene controls.
 
@@ -10,6 +10,10 @@ Visitors can optionally use **Location** to place their phone GPS position on th
 
 ## GitHub Pages
 
-Publish from the `main` branch and repository root. The public URL is:
+Publish from the `main` branch and repository root. The public survey selector is:
 
-https://agonyam.github.io/halil-cevizlik/
+https://agonyam.github.io/map/
+
+The Lokman viewer is available at:
+
+https://agonyam.github.io/map/lokman/
