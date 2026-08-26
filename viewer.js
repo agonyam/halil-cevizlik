@@ -25,82 +25,28 @@
   }
 
   window.viewer = new Potree.Viewer(document.getElementById('potree_render_area'));
-  const renderArea = document.getElementById('potree_render_area');
   const mobilePointBudget = 2000000;
   const restingPointBudget = window.innerWidth <= 600 ? mobilePointBudget : 6000000;
   const movingPointBudget = window.innerWidth <= 600 ? 750000 : 2000000;
   const potreeLoop = viewer.loop.bind(viewer);
   let survey3dActive = new URLSearchParams(location.search).get('view') !== '2d';
-  let lastRenderedFrame = 0;
-  let interactionTimer = null;
-  let pointCloudSettleTimer = null;
-
-  function settlePointCloud(delay) {
-    window.clearTimeout(pointCloudSettleTimer);
-    if (!survey3dActive) return;
-    viewer.setFreeze(false);
-    pointCloudSettleTimer = window.setTimeout(function () {
-      if (survey3dActive) viewer.setFreeze(true);
-    }, delay || 900);
-  }
-
-  function limitedPotreeLoop(timestamp) {
-    if (!survey3dActive || document.hidden) return;
-    if (timestamp - lastRenderedFrame < 32) return;
-    lastRenderedFrame = timestamp;
-    potreeLoop(timestamp);
-  }
 
   function syncPotreeLoop() {
     const shouldRender = survey3dActive && !document.hidden;
     viewer.renderer.setAnimationLoop(null);
     if (shouldRender) {
       viewer.clock.getDelta();
-      lastRenderedFrame = 0;
-      viewer.renderer.setAnimationLoop(limitedPotreeLoop);
+      viewer.renderer.setAnimationLoop(potreeLoop);
     }
-  }
-
-  function beginInteraction() {
-    if (!survey3dActive) return;
-    window.clearTimeout(interactionTimer);
-    window.clearTimeout(pointCloudSettleTimer);
-    // Update LOD while the camera is moving so it does not visibly rebuild
-    // only after the pointer is released.
-    viewer.setFreeze(false);
-    viewer.setEDLEnabled(false);
-  }
-
-  function endInteraction() {
-    window.clearTimeout(interactionTimer);
-    interactionTimer = window.setTimeout(function () {
-      if (!survey3dActive) return;
-      viewer.setPointBudget(restingPointBudget);
-      const modelToggle = document.getElementById('toggle-textured-model');
-      viewer.setEDLEnabled(!modelToggle || !modelToggle.checked);
-      viewer.setFreeze(true);
-    }, 300);
   }
 
   window.setSurvey3dActive = function (active) {
     survey3dActive = Boolean(active);
-    if (!survey3dActive) {
-      window.clearTimeout(interactionTimer);
-      window.clearTimeout(pointCloudSettleTimer);
-      viewer.setFreeze(true);
-      viewer.setPointBudget(movingPointBudget);
-    } else {
-      viewer.setPointBudget(restingPointBudget);
-      settlePointCloud(1200);
-    }
+    viewer.setPointBudget(survey3dActive ? restingPointBudget : movingPointBudget);
     syncPotreeLoop();
   };
 
   document.addEventListener('visibilitychange', syncPotreeLoop);
-  renderArea.addEventListener('pointerdown', beginInteraction, { passive: true });
-  window.addEventListener('pointerup', endInteraction, { passive: true });
-  window.addEventListener('pointercancel', endInteraction, { passive: true });
-  renderArea.addEventListener('wheel', function () { beginInteraction(); endInteraction(); }, { passive: true });
   syncPotreeLoop();
   viewer.setEDLEnabled(true);
   viewer.setFOV(60);
@@ -155,7 +101,6 @@
     pointcloud.material.size = 1;
     viewer.scene.addPointCloud(pointcloud);
     viewer.fitToScreen();
-    settlePointCloud(1800);
     viewer.setLengthUnitAndDisplayUnit('m', 'm');
     loading.classList.add('hidden');
   });
