@@ -29,6 +29,15 @@
   let survey3dActive = new URLSearchParams(location.search).get('view') !== '2d';
   let lastRenderedFrame = 0;
   let interactionTimer = null;
+  let pointCloudSettleTimer = null;
+
+  function settlePointCloud(delay) {
+    window.clearTimeout(pointCloudSettleTimer);
+    viewer.freeze = false;
+    pointCloudSettleTimer = window.setTimeout(function () {
+      if (survey3dActive) viewer.freeze = true;
+    }, delay || 900);
+  }
 
   function limitedPotreeLoop(timestamp) {
     if (!survey3dActive || document.hidden) return;
@@ -50,7 +59,8 @@
   function beginInteraction() {
     if (!survey3dActive) return;
     window.clearTimeout(interactionTimer);
-    viewer.setPointBudget(movingPointBudget);
+    window.clearTimeout(pointCloudSettleTimer);
+    viewer.freeze = true;
     viewer.setEDLEnabled(false);
   }
 
@@ -61,6 +71,7 @@
       viewer.setPointBudget(restingPointBudget);
       const modelToggle = document.getElementById('toggle-textured-model');
       viewer.setEDLEnabled(!modelToggle || !modelToggle.checked);
+      settlePointCloud(900);
     }, 300);
   }
 
@@ -68,8 +79,13 @@
     survey3dActive = Boolean(active);
     if (!survey3dActive) {
       window.clearTimeout(interactionTimer);
+      window.clearTimeout(pointCloudSettleTimer);
+      viewer.freeze = true;
       viewer.setPointBudget(movingPointBudget);
-    } else viewer.setPointBudget(restingPointBudget);
+    } else {
+      viewer.setPointBudget(restingPointBudget);
+      settlePointCloud(1200);
+    }
     syncPotreeLoop();
   };
 
@@ -131,6 +147,7 @@
     pointcloud.material.size = 1;
     viewer.scene.addPointCloud(pointcloud);
     viewer.fitToScreen();
+    settlePointCloud(1800);
     viewer.setLengthUnitAndDisplayUnit('m', 'm');
     loading.classList.add('hidden');
   });
