@@ -4,6 +4,10 @@
   const surveyConfig = window.SURVEY_CONFIG || {};
   const surveySlug = surveyConfig.slug || 'akcakoyun';
   const sharedBase = surveyConfig.sharedBase || '.';
+  const assetBase = (surveyConfig.assetBase || '.').replace(/\/$/, '');
+  const assetUrl = function (path) {
+    return assetBase + '/' + path.replace(/^\.\//, '');
+  };
   const surveyExtent4326 = surveyConfig.extent4326 || [27.1369278057887, 39.798648554838, 27.138907571646, 39.8003184784371];
   const surveyExtent = ol.proj.transformExtent(surveyExtent4326, 'EPSG:4326', 'EPSG:3857');
   const utm35 = '+proj=utm +zone=35 +datum=WGS84 +units=m +no_defs';
@@ -35,7 +39,7 @@
       opacity: opacity,
       extent: surveyExtent,
       source: new ol.source.XYZ({
-        url: './assets/map/' + name + '/{z}/{x}/{y}.png',
+        url: assetUrl('assets/map/' + name + '/{z}/{x}/{y}.png'),
         minZoom: 15,
         maxZoom: 22,
         wrapX: false
@@ -235,10 +239,10 @@
   });
   map.getView().fit(surveyExtent, map.getSize(), { padding: mapFitPadding(), maxZoom: 21 });
 
-  fetch('./assets/shots.geojson').then(function (response) { return response.json(); }).then(function (geojson) {
+  fetch(assetUrl('assets/shots.geojson')).then(function (response) { return response.json(); }).then(function (geojson) {
     camerasSource.addFeatures(new ol.format.GeoJSON().readFeatures(geojson, { featureProjection: 'EPSG:3857' }));
   });
-  fetch('./assets/map/contours-wgs84.geojson').then(function (response) { return response.json(); }).then(function (geojson) {
+  fetch(assetUrl('assets/map/contours-wgs84.geojson')).then(function (response) { return response.json(); }).then(function (geojson) {
     contoursSource.addFeatures(new ol.format.GeoJSON().readFeatures(geojson, { featureProjection: 'EPSG:3857' }));
   });
 
@@ -414,10 +418,10 @@
     elevationControls.hidden = false;
     document.getElementById('elevation-title').textContent = name === 'dtm' ? 'Terrain Model' : 'Surface Model';
     elevationStatus.textContent = 'Loading full-resolution elevation…';
-    return fetch('./assets/map/elevation.json').then(function (response) { return response.json(); }).then(function (metadata) {
+      return fetch(assetUrl('assets/map/elevation.json')).then(function (response) { return response.json(); }).then(function (metadata) {
       elevationMetadata = metadata;
       updateRangeUi();
-      return loadPixels('./assets/map/' + name + '-elevation.png');
+      return loadPixels(assetUrl('assets/map/' + name + '-elevation.png'));
     }).then(function (pixels) {
       if (token !== elevationLoadToken) return;
       elevationPixels = pixels;
@@ -430,7 +434,7 @@
       renderElevation();
       if (elevationStyle.shading === 'none') return null;
       elevationStatus.textContent = 'Adding ' + elevationStyle.shading + ' relief…';
-      return loadPixels('./assets/map/' + name + '-hillshade-' + elevationStyle.shading + '.png').then(function (shade) {
+      return loadPixels(assetUrl('assets/map/' + name + '-hillshade-' + elevationStyle.shading + '.png')).then(function (shade) {
         if (token !== elevationLoadToken) return;
         hillshadePixels = shade;
         renderElevation();
@@ -454,7 +458,7 @@
       return;
     }
     elevationStatus.textContent = 'Loading ' + elevationStyle.shading + ' relief…';
-    loadPixels('./assets/map/' + elevationActive + '-hillshade-' + elevationStyle.shading + '.png').then(function (pixels) {
+    loadPixels(assetUrl('assets/map/' + elevationActive + '-hillshade-' + elevationStyle.shading + '.png')).then(function (pixels) {
       if (token !== elevationLoadToken) return;
       hillshadePixels = pixels;
       renderElevation();
@@ -609,8 +613,8 @@
     if (hydrologyPixels && hydrologyMetadata) return Promise.resolve(true);
     if (hydrologyLoadPromise) return hydrologyLoadPromise;
     hydrologyLoadPromise = Promise.all([
-      elevationMetadata ? Promise.resolve(elevationMetadata) : fetch('./assets/map/elevation.json').then(function (response) { return response.json(); }),
-      loadPixels('./assets/map/dtm-elevation.png')
+      elevationMetadata ? Promise.resolve(elevationMetadata) : fetch(assetUrl('assets/map/elevation.json')).then(function (response) { return response.json(); }),
+      loadPixels(assetUrl('assets/map/dtm-elevation.png'))
     ]).then(function (result) {
       elevationMetadata = elevationMetadata || result[0];
       hydrologyMetadata = result[0].dtm;

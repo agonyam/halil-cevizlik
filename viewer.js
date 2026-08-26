@@ -4,6 +4,10 @@
   const surveyConfig = window.SURVEY_CONFIG || {};
   const surveySlug = surveyConfig.slug || 'akcakoyun';
   const sharedBase = surveyConfig.sharedBase || '.';
+  const assetBase = (surveyConfig.assetBase || '.').replace(/\/$/, '');
+  const assetUrl = function (path) {
+    return assetBase + '/' + path.replace(/^\.\//, '');
+  };
   const loading = document.getElementById('loading');
   const loadingText = document.getElementById('loading-text');
   const toast = document.getElementById('toast');
@@ -142,7 +146,7 @@
 
   viewer.loadGUI(setupSidebar);
 
-  Potree.loadPointCloud('./assets/entwine_pointcloud/ept.json', 'Point Cloud', function (event) {
+  Potree.loadPointCloud(assetUrl('assets/entwine_pointcloud/ept.json'), 'Point Cloud', function (event) {
     if (event.type === 'loading_failed') {
       loadingText.textContent = 'The point cloud could not be loaded.';
       return;
@@ -172,7 +176,7 @@
     const draco = new THREE.DRACOLoader();
     draco.setDecoderPath(sharedBase + '/vendor/draco/');
     loader.setDRACOLoader(draco);
-    loader.load('./assets/textured_model.glb', function (gltf) {
+    loader.load(assetUrl('assets/textured_model.glb'), function (gltf) {
       texturedModel = gltf.scene;
       const center = texturedModel.CESIUM_RTC && texturedModel.CESIUM_RTC.center;
       if (center) {
@@ -218,7 +222,7 @@
   function loadCameras(callback) {
     if (cameraObjects.length) return callback();
     Promise.all([
-      fetch('./assets/shots.geojson').then(function (response) { return response.json(); }),
+      fetch(assetUrl('assets/shots.geojson')).then(function (response) { return response.json(); }),
       new Promise(function (resolve, reject) {
         new THREE.GLTFLoader().load(sharedBase + '/vendor/camera.glb', function (gltf) { resolve(gltf.scene); }, undefined, reject);
       })
