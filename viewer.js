@@ -127,6 +127,7 @@
       '<label class="webodm-menu-row"><input id="toggle-textured-model" type="checkbox"> Show textured model</label>' +
       '<div id="model-progress" class="webodm-progress"></div>'
     );
+    if (surveyConfig.hasTexturedModel === false) $('#textured_model_button').hide();
     $('#cameras_button').html(
       '<label class="webodm-menu-row"><input id="toggle-cameras" type="checkbox"> Show cameras</label>' +
       '<label class="webodm-menu-row">Scale <input id="camera-scale" type="range" min="1" max="12" step="0.5" value="4"></label>'
