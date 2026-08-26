@@ -33,9 +33,10 @@
 
   function settlePointCloud(delay) {
     window.clearTimeout(pointCloudSettleTimer);
-    viewer.freeze = false;
+    if (!survey3dActive) return;
+    viewer.setFreeze(false);
     pointCloudSettleTimer = window.setTimeout(function () {
-      if (survey3dActive) viewer.freeze = true;
+      if (survey3dActive) viewer.setFreeze(true);
     }, delay || 900);
   }
 
@@ -60,7 +61,9 @@
     if (!survey3dActive) return;
     window.clearTimeout(interactionTimer);
     window.clearTimeout(pointCloudSettleTimer);
-    viewer.freeze = true;
+    // Update LOD while the camera is moving so it does not visibly rebuild
+    // only after the pointer is released.
+    viewer.setFreeze(false);
     viewer.setEDLEnabled(false);
   }
 
@@ -71,7 +74,7 @@
       viewer.setPointBudget(restingPointBudget);
       const modelToggle = document.getElementById('toggle-textured-model');
       viewer.setEDLEnabled(!modelToggle || !modelToggle.checked);
-      settlePointCloud(900);
+      viewer.setFreeze(true);
     }, 300);
   }
 
@@ -80,7 +83,7 @@
     if (!survey3dActive) {
       window.clearTimeout(interactionTimer);
       window.clearTimeout(pointCloudSettleTimer);
-      viewer.freeze = true;
+      viewer.setFreeze(true);
       viewer.setPointBudget(movingPointBudget);
     } else {
       viewer.setPointBudget(restingPointBudget);
@@ -91,8 +94,8 @@
 
   document.addEventListener('visibilitychange', syncPotreeLoop);
   renderArea.addEventListener('pointerdown', beginInteraction, { passive: true });
-  renderArea.addEventListener('pointerup', endInteraction, { passive: true });
-  renderArea.addEventListener('pointercancel', endInteraction, { passive: true });
+  window.addEventListener('pointerup', endInteraction, { passive: true });
+  window.addEventListener('pointercancel', endInteraction, { passive: true });
   renderArea.addEventListener('wheel', function () { beginInteraction(); endInteraction(); }, { passive: true });
   syncPotreeLoop();
   viewer.setEDLEnabled(true);
