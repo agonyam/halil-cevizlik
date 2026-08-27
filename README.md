@@ -17,3 +17,7 @@ https://agonyam.github.io/map/
 The Lokman viewer is available at:
 
 https://agonyam.github.io/map/lokman/
+
+## Maintenance
+
+Agents adding or updating WebODM locations should follow [WEBODM_LOCATION_WORKFLOW.md](./WEBODM_LOCATION_WORKFLOW.md). It documents the R2 asset workflow, location configuration, testing, and GitHub Pages publication safeguards.

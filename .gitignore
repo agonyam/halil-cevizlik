@@ -36,3 +36,6 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Location survey binaries are hosted in Cloudflare R2, never in GitHub Pages.
+/*/assets/
