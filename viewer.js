@@ -225,13 +225,22 @@
     else navigator.clipboard.writeText(location.href).then(function () { notify('Viewer link copied.'); });
   });
 
+  function utmDefinition() {
+    const extent = surveyConfig.extent4326;
+    if (!Array.isArray(extent) || extent.length !== 4) return '+proj=utm +zone=35 +datum=WGS84 +units=m +no_defs';
+    const centerLon = (extent[0] + extent[2]) / 2;
+    const centerLat = (extent[1] + extent[3]) / 2;
+    const zone = Math.max(1, Math.min(60, Math.floor((centerLon + 180) / 6) + 1));
+    return '+proj=utm +zone=' + zone + (centerLat < 0 ? ' +south' : '') + ' +datum=WGS84 +units=m +no_defs';
+  }
+
   document.getElementById('show-location').addEventListener('click', function () {
     if (!navigator.geolocation) return notify('Location is not supported by this browser.');
     notify('Waiting for GPS…');
     navigator.geolocation.getCurrentPosition(function (position) {
       const lon = position.coords.longitude;
       const lat = position.coords.latitude;
-      const utm = proj4('EPSG:4326', '+proj=utm +zone=35 +datum=WGS84 +units=m +no_defs', [lon, lat]);
+      const utm = proj4('EPSG:4326', utmDefinition(), [lon, lat]);
       const marker = new THREE.Mesh(new THREE.SphereGeometry(1.2, 18, 18), new THREE.MeshBasicMaterial({ color: 0x31b9ff }));
       marker.position.set(utm[0], utm[1], 310);
       viewer.scene.scene.add(marker);

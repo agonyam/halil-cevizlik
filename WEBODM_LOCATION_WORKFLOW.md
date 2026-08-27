@@ -51,7 +51,7 @@ Do not create or retain `<slug>/assets/` in this repository. The directory below
     dsm-hillshade-extruded.png
 ```
 
-The browser-facing files must use WGS 84 extents. Preserve the original survey CRS in metadata; current locations use WGS 84 / UTM zone 35N for metric calculations.
+The browser-facing files must use WGS 84 extents. Preserve the original survey CRS in metadata; metric calculations use a UTM zone derived automatically from the midpoint of `extent4326`. Pass `utmDefinition` in `SURVEY_CONFIG` only when a location needs an explicit override.
 
 Do not publish raw source photographs, raw GeoTIFFs, the original full LAZ, reports, caches, or WebODM credentials. The EPT hierarchy and tiled/derived map products are the deployable outputs.
 
@@ -108,7 +108,9 @@ window.SURVEY_CONFIG = {
 Rules:
 
 - `assetBase` must use the R2 proxy and end at the location slug, not `/assets`.
-- `extent4326` order is west, south, east, north.
+- `extent4326` order is west, south, east, north; it is required — the viewer throws without it.
+- `elevationRanges` is required for both dtm and dsm — the viewer throws without it.
+- UTM zone is derived from the extent midpoint; override only via `utmDefinition` in `SURVEY_CONFIG`.
 - Use measured DTM/DSM ranges, not copied values from another survey.
 - Give every location a unique `waterPlanStorageKey` so saved irrigation plans do not collide.
 - Set `hasTexturedModel: false` when no verified GLB is available.

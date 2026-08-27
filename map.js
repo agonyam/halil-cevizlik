@@ -8,9 +8,17 @@
   const assetUrl = function (path) {
     return assetBase + '/' + path.replace(/^\.\//, '');
   };
-  const surveyExtent4326 = surveyConfig.extent4326 || [27.1369278057887, 39.798648554838, 27.138907571646, 39.8003184784371];
+  if (!Array.isArray(surveyConfig.extent4326) || surveyConfig.extent4326.length !== 4) {
+    throw new Error('SURVEY_CONFIG.extent4326 must be set to [west, south, east, north] by ' + document.title);
+  }
+  const surveyExtent4326 = surveyConfig.extent4326;
   const surveyExtent = ol.proj.transformExtent(surveyExtent4326, 'EPSG:4326', 'EPSG:3857');
-  const utm35 = '+proj=utm +zone=35 +datum=WGS84 +units=m +no_defs';
+  const utmDefinition = surveyConfig.utmDefinition || function () {
+    const centerLon = (surveyExtent4326[0] + surveyExtent4326[2]) / 2;
+    const centerLat = (surveyExtent4326[1] + surveyExtent4326[3]) / 2;
+    const zone = Math.max(1, Math.min(60, Math.floor((centerLon + 180) / 6) + 1));
+    return '+proj=utm +zone=' + zone + (centerLat < 0 ? ' +south' : '') + ' +datum=WGS84 +units=m +no_defs';
+  }();
   const mapViewElement = document.getElementById('map-view');
   const coordinateReadout = document.getElementById('map-coordinates');
   const mapToolsToggle = document.getElementById('map-tools-toggle');
@@ -64,10 +72,10 @@
   let waterPreviousTerrainOpacity = null;
   let waterBackgroundLayer = null;
   let waterTerrainOpacity = .58;
-  const elevationRanges = surveyConfig.elevationRanges || {
-    dtm: { min: 280.370, max: 284.936 },
-    dsm: { min: 281.165, max: 297.314 }
-  };
+  if (!surveyConfig.elevationRanges || !surveyConfig.elevationRanges.dtm || !surveyConfig.elevationRanges.dsm) {
+    throw new Error('SURVEY_CONFIG.elevationRanges must define measured dtm and dsm ranges in ' + document.title);
+  }
+  const elevationRanges = surveyConfig.elevationRanges;
   const elevationStyle = { color: 'viridis', shading: 'normal' };
   const elevationControls = document.getElementById('elevation-controls');
   const elevationStatus = document.getElementById('elevation-status');
@@ -474,7 +482,7 @@
   const resultOverlays = [];
 
   function toUtm(coordinate) {
-    return proj4('EPSG:4326', utm35, ol.proj.transform(coordinate, 'EPSG:3857', 'EPSG:4326'));
+    return proj4('EPSG:4326', utmDefinition, ol.proj.transform(coordinate, 'EPSG:3857', 'EPSG:4326'));
   }
 
   function formatDistance(coordinates) {
