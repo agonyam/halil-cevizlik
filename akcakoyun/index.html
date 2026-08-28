@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="../vendor/potree/libs/openlayers3/ol.css">
   <link rel="stylesheet" href="../vendor/potree/libs/spectrum/spectrum.css">
   <link rel="stylesheet" href="../vendor/potree/libs/jstree/themes/mixed/style.css">
-  <link rel="stylesheet" href="../viewer.css?v=20260828-water-focus">
+  <link rel="stylesheet" href="../viewer.css?v=20260828-wet-look">
 </head>
 <body>
   <main class="model-view">
@@ -157,7 +157,7 @@
           <button id="map-fullscreen" type="button">⛶ Fullscreen</button>
         </div>
       </aside>
-      <div id="water-legend" class="water-legend" hidden><strong>Water simulation</strong><span id="water-wetting-key" hidden><i class="water-key-wetting"></i>Emitter wetting</span><span><i class="water-key-flow"></i>Runoff flow</span><span><i class="water-key-pool"></i>Water buildup</span><span id="water-low-pressure-key" hidden><i class="water-key-low-pressure"></i>Low pressure</span><span id="water-low-flow-key" hidden><i class="water-key-low-flow"></i>Below target flow</span><span><i class="water-key-entry"></i>Water entry</span></div>
+      <div id="water-legend" class="water-legend" hidden><strong>Water simulation</strong><span id="water-infiltration-key" hidden><i class="water-key-infiltration"></i>Wetted soil</span><span id="water-wetting-key" hidden><i class="water-key-wetting"></i>Emitter wetting</span><span><i class="water-key-nodata"></i>No terrain data</span><span><i class="water-key-flow"></i>Runoff flow</span><span><i class="water-key-pool"></i>Water buildup</span><span id="water-low-pressure-key" hidden><i class="water-key-low-pressure"></i>Low pressure</span><span id="water-low-flow-key" hidden><i class="water-key-low-flow"></i>Below target flow</span><span><i class="water-key-entry"></i>Water entry</span></div>
       <div id="water-timeline" class="water-timeline" hidden>
         <button id="water-play" type="button" aria-label="Play water simulation">▶</button>
         <input id="water-time" type="range" min="0" max="100" step="1" value="100" aria-label="Water simulation timeline">
@@ -222,6 +222,6 @@
     };
   </script>
   <script src="../viewer.js"></script>
-  <script src="../map.js?v=20260828-water-focus"></script>
+  <script src="../map.js?v=20260828-wet-look"></script>
 </body>
 </html>

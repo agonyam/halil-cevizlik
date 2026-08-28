@@ -1152,6 +1152,19 @@
         image.data[offset + 3] = Math.round((100 + 130 * depthStrength) * Math.sqrt(localProgress));
       }
     }
+    if (state.infiltrationSnapshots && !state.wetting) {
+      const infiltrationSnapshot = state.infiltrationSnapshots[Math.min(state.infiltrationSnapshots.length - 1, Math.round(progress * (state.infiltrationSnapshots.length - 1)))];
+      for (let i = 0; i < grid.size; i += 1) {
+        if (!grid.valid[i] || !infiltrationSnapshot[i]) continue;
+        const depth = infiltrationSnapshot[i] * state.infiltrationSnapshotScale;
+        const strength = Math.min(1, Math.sqrt(depth / Math.max(.0005, state.maxInfiltrationDepth)));
+        const offset = i * 4;
+        image.data[offset] = 32;
+        image.data[offset + 1] = 42;
+        image.data[offset + 2] = 54;
+        image.data[offset + 3] = Math.round(28 + 95 * strength);
+      }
+    }
     const snapshot = state.snapshots[Math.min(state.snapshots.length - 1, Math.round(progress * (state.snapshots.length - 1)))];
     for (let i = 0; i < grid.size; i += 1) {
       if (!grid.valid[i] || !snapshot[i]) continue;
@@ -1162,6 +1175,17 @@
       image.data[offset + 1] = Math.round(waterDepthRgb[1]);
       image.data[offset + 2] = Math.round(waterDepthRgb[2]);
       image.data[offset + 3] = Math.round(70 + 180 * Math.min(1, Math.sqrt(depth / .2)));
+    }
+    for (let y = 0; y < grid.height; y += 1) {
+      for (let x = 0; x < grid.width; x += 1) {
+        const index = y * grid.width + x;
+        if (grid.valid[index]) continue;
+        const offset = index * 4;
+        image.data[offset] = 30;
+        image.data[offset + 1] = 38;
+        image.data[offset + 2] = 46;
+        image.data[offset + 3] = (x + y) % 6 < 2 ? 115 : 40;
+      }
     }
     context.putImageData(image, 0, 0);
     if (!waterBackgroundLayer) {
@@ -1729,6 +1753,7 @@
     ['water-place', 'water-pipe', 'water-erase', 'water-zone'].forEach(function (id) { document.getElementById(id).hidden = rain; });
     ['water-drip-summary-row', 'water-uniformity-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
     document.getElementById('water-wetting-key').hidden = !drip;
+    document.getElementById('water-infiltration-key').hidden = drip;
     document.getElementById('water-status').textContent = rain ? 'Set the rain event and simulate terrain runoff.' : drip ? 'Add an entry, then draw mainline, submain and dripline pipes.' : 'Add entry points and pipe routes, or draw a watering zone.';
   }
 
