@@ -153,11 +153,13 @@ Test at desktop and phone-sized viewports.
 
 ## Updating an existing location
 
-1. Stage the replacement assets under a temporary prefix.
-2. Verify the complete EPT, imagery, terrain products, and metadata.
-3. Replace the R2 `<slug>/assets/` prefix only after validation.
+1. Stage the replacement assets under a **new versioned prefix**: `<slug>/assets-v2/`, `<slug>/assets-v3/`, … Never overwrite an existing version in place.
+2. Verify the complete EPT, imagery, terrain products, and metadata under the new prefix.
+3. Point the location HTML's `assetBase` at the new versioned prefix and remove the old R2 prefix only afterwards.
 4. Update the location HTML only when bounds, ranges, area, date, or model availability changed.
 5. Retest both 2D and 3D; browser caches can retain old metadata, so use a cache-busting query during verification.
+
+Versioned prefixes are mandatory because R2 assets are served `immutable` for a year: returning visitors hold old EPT chunks and tiles under the exact same keys, and replacing a survey in place makes their browsers mix old cached point chunks with the new hierarchy — rendering ghost or doubled point clouds that only a hard refresh clears. A fresh prefix makes every replacement safe for every visitor.
 
 Do not change shared code while updating survey data unless the same defect is reproduced across locations. Shared changes must be regression-tested on at least one existing location and the new/updated location.
 
