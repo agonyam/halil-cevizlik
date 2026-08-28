@@ -1110,6 +1110,26 @@
     return { wetting: wetting, arrivals: arrivals, maxDepthMm: maxDepth, referenceDepthMm: referenceDepth };
   }
 
+  const waterDepthRamp = [
+    [0, 127, 205, 250],
+    [.05, 109, 185, 245],
+    [.15, 85, 160, 233],
+    [.4, 56, 128, 214],
+    [1, 33, 102, 172],
+    [2, 84, 39, 143]
+  ];
+  const waterDepthRgb = [0, 0, 0];
+  function waterDepthColor(depth) {
+    let upper = 1;
+    while (upper < waterDepthRamp.length - 1 && depth > waterDepthRamp[upper][0]) upper += 1;
+    const lower = waterDepthRamp[upper - 1];
+    const next = waterDepthRamp[upper];
+    const mix = Math.max(0, Math.min(1, (depth - lower[0]) / (next[0] - lower[0])));
+    waterDepthRgb[0] = lower[1] + (next[1] - lower[1]) * mix;
+    waterDepthRgb[1] = lower[2] + (next[2] - lower[2]) * mix;
+    waterDepthRgb[2] = lower[3] + (next[3] - lower[3]) * mix;
+  }
+
   function renderWaterTimeline(progress) {
     if (!waterSimulationState) return;
     const state = waterSimulationState;
@@ -1126,43 +1146,22 @@
         const localProgress = Math.min(1, (progress - arrival) / Math.max(.001, 1 - arrival));
         const depthStrength = Math.min(1, state.wetting[i] / Math.max(.1, state.wettingReferenceDepthMm || state.maxWettingDepthMm));
         const offset = i * 4;
-        image.data[offset] = 0;
-        image.data[offset + 1] = 220 + Math.round(35 * depthStrength);
-        image.data[offset + 2] = 110 + Math.round(50 * depthStrength);
-        image.data[offset + 3] = Math.round((120 + 120 * depthStrength) * Math.sqrt(localProgress));
-      }
-    }
-    if (state.infiltrationSnapshots && !state.wetting) {
-      const infiltrationSnapshot = state.infiltrationSnapshots[Math.min(state.infiltrationSnapshots.length - 1, Math.round(progress * (state.infiltrationSnapshots.length - 1)))];
-      for (let i = 0; i < grid.size; i += 1) {
-        if (!grid.valid[i] || !infiltrationSnapshot[i]) continue;
-        const depth = infiltrationSnapshot[i] * state.infiltrationSnapshotScale;
-        const strength = Math.min(1, Math.sqrt(depth / Math.max(.0005, state.maxInfiltrationDepth)));
-        const offset = i * 4;
-        image.data[offset] = 0;
-        image.data[offset + 1] = 205 + Math.round(50 * strength);
-        image.data[offset + 2] = 115 + Math.round(35 * strength);
-        image.data[offset + 3] = Math.round(55 + 125 * strength);
+        image.data[offset] = 115 - Math.round(35 * depthStrength);
+        image.data[offset + 1] = 190 + Math.round(25 * depthStrength);
+        image.data[offset + 2] = 245;
+        image.data[offset + 3] = Math.round((100 + 130 * depthStrength) * Math.sqrt(localProgress));
       }
     }
     const snapshot = state.snapshots[Math.min(state.snapshots.length - 1, Math.round(progress * (state.snapshots.length - 1)))];
     for (let i = 0; i < grid.size; i += 1) {
       if (!grid.valid[i] || !snapshot[i]) continue;
       const depth = snapshot[i] * state.snapshotScale;
-      const strength = Math.min(1, Math.sqrt(depth / Math.max(.001, state.maxPoolDepth)));
-      const poolCapacity = Math.max(0, grid.filled[i] - grid.elevation[i]);
+      waterDepthColor(depth);
       const offset = i * 4;
-      if (poolCapacity > .03 && depth > .005) {
-        image.data[offset] = 5;
-        image.data[offset + 1] = 45 + Math.round(45 * (1 - strength));
-        image.data[offset + 2] = 220;
-        image.data[offset + 3] = Math.round(120 + 130 * strength);
-      } else {
-        image.data[offset] = 0;
-        image.data[offset + 1] = 150 + Math.round(65 * strength);
-        image.data[offset + 2] = 255;
-        image.data[offset + 3] = Math.round(50 + 195 * strength);
-      }
+      image.data[offset] = Math.round(waterDepthRgb[0]);
+      image.data[offset + 1] = Math.round(waterDepthRgb[1]);
+      image.data[offset + 2] = Math.round(waterDepthRgb[2]);
+      image.data[offset + 3] = Math.round(70 + 180 * Math.min(1, Math.sqrt(depth / .2)));
     }
     context.putImageData(image, 0, 0);
     if (!waterBackgroundLayer) {
@@ -1356,7 +1355,7 @@
     document.getElementById('water-demand').textContent = formatVolume(demandLitersDay) + '/day · ' + Math.round(designFlow * 60).toLocaleString() + ' L/h (' + designFlow.toFixed(1) + ' L/min)';
     document.getElementById('water-pipe-result').textContent = pipe.length.toFixed(1) + ' m drawn · test ' + numberValue('water-diameter', 25) + ' mm ID: critical path ' + pipe.loss.toFixed(1) + ' m loss, maximum ' + pipe.velocity.toFixed(1) + ' m/s · suggested ≥ ' + recommended + ' mm';
     document.getElementById('water-pump').textContent = formatPower(pumpKw) + ' · ' + totalHead.toFixed(1) + ' m head';
-    document.getElementById('water-solar').textContent = formatSolarPower(solarKwp) + ' · about ' + panelCount + ' × 550 W panels';
+    document.getElementById('water-solar').textContent = formatSolarPower(solarKwp) + ' · about ' + panelCount + ' × 550 W panel' + (panelCount === 1 ? '' : 's');
     document.getElementById('water-demand-row').hidden = false;
     document.getElementById('water-pump-row').hidden = false;
     document.getElementById('water-solar-row').hidden = false;
@@ -1729,6 +1728,7 @@
     document.getElementById('water-drip-fields').hidden = !drip;
     ['water-place', 'water-pipe', 'water-erase', 'water-zone'].forEach(function (id) { document.getElementById(id).hidden = rain; });
     ['water-drip-summary-row', 'water-uniformity-row'].forEach(function (id) { document.getElementById(id).hidden = true; });
+    document.getElementById('water-wetting-key').hidden = !drip;
     document.getElementById('water-status').textContent = rain ? 'Set the rain event and simulate terrain runoff.' : drip ? 'Add an entry, then draw mainline, submain and dripline pipes.' : 'Add entry points and pipe routes, or draw a watering zone.';
   }
 
