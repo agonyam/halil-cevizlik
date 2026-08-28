@@ -749,15 +749,15 @@
     const northeast = toUtm([surveyExtent[2], surveyExtent[3]]);
     const cellWidth = Math.abs(northeast[0] - southwest[0]) / width;
     const cellHeight = Math.abs(northeast[1] - southwest[1]) / height;
-    const cellArea = surveyAreaSquareMeters / Math.max(1, validCellCount);
-    hydrologyGrid = { width: width, height: height, size: size, elevation: elevation, filled: filled, valid: valid, cellWidth: cellWidth, cellHeight: cellHeight, cellArea: cellArea };
+    const cellArea = cellWidth * cellHeight;
+    hydrologyGrid = { width: width, height: height, size: size, elevation: elevation, filled: filled, valid: valid, cellWidth: cellWidth, cellHeight: cellHeight, cellArea: cellArea, validArea: validCellCount * cellArea };
     return hydrologyGrid;
   }
 
   function solveHydrology(options) {
     const grid = buildHydrologyGrid();
     return new Promise(function (resolve, reject) {
-      const worker = new Worker(sharedBase + '/hydrology-worker.js');
+      const worker = new Worker(sharedBase + '/hydrology-worker.js?v=20260828-accuracy-2');
       worker.onmessage = function (event) {
         worker.terminate();
         if (event.data.error) { reject(new Error(event.data.error)); return; }
@@ -792,7 +792,7 @@
   }
 
   function irrigationOutlets(entryFeatures) {
-    const pipes = waterPipeSource.getFeatures();
+    const pipes = waterPipeSource.getFeatures().filter(function (pipe) { return (pipe.get('pipeRole') || 'delivery') === 'delivery'; });
     const outlets = [];
     entryFeatures.forEach(function (entry) {
       const entryNumber = entry.get('entryNumber');
@@ -801,14 +801,7 @@
         outlets.push({ coordinate: entry.getGeometry().getCoordinates(), direction: null, weight: 1 / entryFeatures.length });
         return;
       }
-      const terminalPipes = connected.filter(function (pipeFeature) {
-        const coordinates = pipeFeature.getGeometry().getCoordinates();
-        const end = coordinates[coordinates.length - 1];
-        return !connected.some(function (candidate) {
-          if (candidate === pipeFeature) return false;
-          return distanceMeters([end, candidate.getGeometry().getFirstCoordinate()]) < 1;
-        });
-      });
+      const terminalPipes = connected.filter(function (pipeFeature) { return !connected.some(function (candidate) { return candidate.get('parentPipe') === pipeFeature.get('pipeId'); }); });
       const terminals = terminalPipes.length ? terminalPipes : connected;
       terminals.forEach(function (pipeFeature) {
         const coordinates = pipeFeature.getGeometry().getCoordinates();
@@ -816,7 +809,7 @@
         const previous = coordinates[coordinates.length - 2];
         const dx = end[0] - previous[0]; const dy = end[1] - previous[1];
         const length = Math.max(.000001, Math.hypot(dx, dy));
-        outlets.push({ coordinate: end, direction: [dx / length, dy / length], weight: 1 / entryFeatures.length / terminals.length });
+        outlets.push({ coordinate: end, direction: [dx / length, dy / length], weight: 1 / entryFeatures.length / terminals.length, pipe: pipeFeature });
       });
     });
     return outlets;
@@ -840,24 +833,34 @@
           }
         }
       }
-      if (nearest >= 0) weights[nearest] += amount;
+      if (nearest >= 0) { weights[nearest] += amount; return true; }
+      return false;
     }
+    let unmappedOutlets = 0;
     outlets.forEach(function (outlet) {
-      if (!outlet.direction) { addCoordinate(outlet.coordinate, outlet.weight); return; }
+      if (!outlet.direction) {
+        if (!addCoordinate(outlet.coordinate, outlet.weight)) unmappedOutlets += 1;
+        return;
+      }
       const outletFlow = totalFlow * outlet.weight;
-      const outletVelocity = pipeMetrics(outletFlow, diameterMm).velocity;
+      const outletDiameter = diameterMm / 1000;
+      const outletVelocity = outletDiameter > 0 ? (outletFlow / 60000) / (Math.PI * outletDiameter * outletDiameter / 4) : 0;
       const jetLengthMeters = Math.max(.5, Math.min(8, outletVelocity * .7));
       const latitude = ol.proj.toLonLat(outlet.coordinate)[1] * Math.PI / 180;
       const mapUnitsPerMeter = 1 / Math.max(.2, Math.cos(latitude));
       const samples = Math.max(2, Math.min(8, Math.ceil(jetLengthMeters / Math.max(.5, Math.min(grid.cellWidth, grid.cellHeight)))));
+      let mapped = false;
       for (let sample = 0; sample <= samples; sample += 1) {
         const distance = jetLengthMeters * mapUnitsPerMeter * sample / samples;
-        addCoordinate([outlet.coordinate[0] + outlet.direction[0] * distance, outlet.coordinate[1] + outlet.direction[1] * distance], outlet.weight * (.35 + sample / samples));
+        mapped = addCoordinate([outlet.coordinate[0] + outlet.direction[0] * distance, outlet.coordinate[1] + outlet.direction[1] * distance], outlet.weight * (.35 + sample / samples)) || mapped;
       }
+      if (!mapped) unmappedOutlets += 1;
     });
+    if (unmappedOutlets) throw new Error(unmappedOutlets + ' water outlet' + (unmappedOutlets === 1 ? ' is' : 's are') + ' outside the valid terrain footprint. Move the affected entry or pipe endpoint onto the DTM.');
     let total = 0;
     for (let i = 0; i < weights.length; i += 1) total += weights[i];
-    if (total) for (let i = 0; i < weights.length; i += 1) weights[i] /= total;
+    if (!total) throw new Error('No water source could be placed on the valid terrain footprint.');
+    for (let i = 0; i < weights.length; i += 1) weights[i] /= total;
     return weights;
   }
 
@@ -894,11 +897,55 @@
   }
 
   function buildDripNetwork(entryFeatures) {
-    const pipes = waterPipeSource.getFeatures();
+    const allPipes = waterPipeSource.getFeatures();
+    const pipes = allPipes.filter(function (pipe) { return ['mainline', 'submain', 'dripline'].indexOf(pipe.get('pipeRole')) !== -1; });
     pipes.forEach(function (pipe) { if (!pipe.get('pipeId')) pipe.set('pipeId', 'pipe-' + waterPipeSequence++); });
+    const pipeIds = pipes.map(function (pipe) { return pipe.get('pipeId'); });
+    if (new Set(pipeIds).size !== pipeIds.length) throw new Error('The drip network contains duplicate pipe IDs. Erase and redraw the affected pipes.');
     const byId = new Map();
     const children = new Map();
     pipes.forEach(function (pipe) { byId.set(pipe.get('pipeId'), pipe); children.set(pipe.get('pipeId'), []); });
+    const allById = new Map();
+    allPipes.forEach(function (pipe) { if (pipe.get('pipeId')) allById.set(pipe.get('pipeId'), pipe); });
+    const entryByNumber = new Map();
+    entryFeatures.forEach(function (entry) { entryByNumber.set(entry.get('entryNumber'), entry); });
+    const allowedParents = { mainline: ['mainline'], submain: ['mainline', 'submain'], dripline: ['mainline', 'submain'] };
+    pipes.forEach(function (pipe) {
+      const pipeId = pipe.get('pipeId');
+      const role = pipe.get('pipeRole');
+      const parentId = pipe.get('parentPipe');
+      const start = pipe.getGeometry().getFirstCoordinate();
+      if (!parentId) {
+        const entry = entryByNumber.get(pipe.get('entryNumber'));
+        if (role !== 'mainline' || !entry || distanceMeters([start, entry.getGeometry().getCoordinates()]) > 2) {
+          throw new Error('Pipe ' + pipeId + ' is not connected to a water entry through a mainline. Reconnect or redraw the detached pipe.');
+        }
+        return;
+      }
+      const parent = byId.get(parentId);
+      if (!parent) {
+        const referenced = allById.get(parentId);
+        throw new Error(referenced && referenced.get('pipeRole') === 'delivery' ? 'A drip-network pipe is connected through an irrigation delivery pipe. Reconnect its upstream end to a drip mainline, submain or entry.' : 'Pipe ' + pipeId + ' references a missing upstream pipe. Reconnect or redraw the detached pipe.');
+      }
+      if (parent.get('entryNumber') !== pipe.get('entryNumber')) throw new Error('Pipe ' + pipeId + ' crosses between different water entries. Reconnect it within one entry network.');
+      if (allowedParents[role].indexOf(parent.get('pipeRole')) === -1) throw new Error('Pipe ' + pipeId + ' has an invalid ' + parent.get('pipeRole') + ' → ' + role + ' connection. Connect driplines to a mainline or submain.');
+      const closest = parent.getGeometry().getClosestPoint(start);
+      const actualDistance = distanceAlongCoordinates(parent.getGeometry().getCoordinates(), closest);
+      const savedDistance = Number(pipe.get('parentDistance'));
+      const parentLength = distanceMeters(parent.getGeometry().getCoordinates());
+      if (distanceMeters([start, closest]) > 2 || !Number.isFinite(savedDistance) || savedDistance < 0 || savedDistance > parentLength + 2 || Math.abs(savedDistance - actualDistance) > 2) {
+        throw new Error('Pipe ' + pipeId + ' has an invalid upstream connection point. Reconnect or redraw the detached pipe.');
+      }
+    });
+    pipes.forEach(function (pipe) {
+      const visited = new Set(); let cursor = pipe;
+      while (cursor) {
+        const cursorId = cursor.get('pipeId');
+        if (visited.has(cursorId)) throw new Error('The drip network contains a pipe cycle. Erase and redraw the affected connection.');
+        visited.add(cursorId);
+        cursor = byId.get(cursor.get('parentPipe'));
+      }
+    });
     pipes.forEach(function (pipe) {
       const parentId = pipe.get('parentPipe');
       if (parentId && children.has(parentId)) children.get(parentId).push(pipe);
@@ -910,24 +957,54 @@
       const points = pipe.get('pipeRole') === 'dripline' ? pointsAlongPipe(pipe, spacing) : [];
       emittersByPipe.set(pipe.get('pipeId'), points);
     });
-    const countCache = new Map();
-    function downstreamEmitterCount(pipeId, trail) {
-      if (countCache.has(pipeId)) return countCache.get(pipeId);
-      if (trail.has(pipeId)) return 0;
-      const nextTrail = new Set(trail); nextTrail.add(pipeId);
-      let count = (emittersByPipe.get(pipeId) || []).length;
-      (children.get(pipeId) || []).forEach(function (child) { count += downstreamEmitterCount(child.get('pipeId'), nextTrail); });
-      countCache.set(pipeId, count);
-      return count;
-    }
-    const entryByNumber = new Map();
-    entryFeatures.forEach(function (entry) { entryByNumber.set(entry.get('entryNumber'), entry); });
     const designHead = numberValue('drip-pressure', 1.2) * 10.197;
     const pc = document.getElementById('drip-emitter-type').value === 'pc';
     const emitters = [];
     pipes.forEach(function (lateral) {
       const points = emittersByPipe.get(lateral.get('pipeId')) || [];
       points.forEach(function (point) {
+        emitters.push({ coordinate: point.coordinate, distance: point.distance, pipe: lateral, pressureBar: 0, flowLh: nominalFlow, targetFlowLh: nominalFlow, pressureDeficient: false });
+      });
+    });
+    const emittersByPipeId = new Map();
+    pipes.forEach(function (pipe) { emittersByPipeId.set(pipe.get('pipeId'), []); });
+    emitters.forEach(function (emitter) { emittersByPipeId.get(emitter.pipe.get('pipeId')).push(emitter); });
+    function calculatePipeFlows() {
+      const flows = new Map();
+      function total(pipeId, trail) {
+        if (flows.has(pipeId)) return flows.get(pipeId);
+        if (trail.has(pipeId)) return 0;
+        const nextTrail = new Set(trail); nextTrail.add(pipeId);
+        let flow = (emittersByPipeId.get(pipeId) || []).reduce(function (sum, emitter) { return sum + emitter.flowLh; }, 0);
+        (children.get(pipeId) || []).forEach(function (child) { flow += total(child.get('pipeId'), nextTrail); });
+        flows.set(pipeId, flow);
+        return flow;
+      }
+      pipes.forEach(function (pipe) { total(pipe.get('pipeId'), new Set()); });
+      return flows;
+    }
+    function lossToDistance(pipe, targetDistance, pipeFlows) {
+      const pipeId = pipe.get('pipeId');
+      const events = (emittersByPipeId.get(pipeId) || []).map(function (emitter) { return { distance: emitter.distance, flow: emitter.flowLh }; });
+      (children.get(pipeId) || []).forEach(function (child) {
+        events.push({ distance: Math.max(0, Number(child.get('parentDistance')) || 0), flow: pipeFlows.get(child.get('pipeId')) || 0 });
+      });
+      events.sort(function (a, b) { return a.distance - b.distance; });
+      let cursor = 0; let flow = pipeFlows.get(pipeId) || 0; let loss = 0;
+      events.forEach(function (event) {
+        if (event.distance >= targetDistance) return;
+        const end = Math.max(cursor, Math.min(targetDistance, event.distance));
+        loss += hazenWilliamsLoss(end - cursor, flow, dripPipeDiameter(pipe.get('pipeRole')));
+        cursor = end; flow = Math.max(0, flow - event.flow);
+      });
+      loss += hazenWilliamsLoss(Math.max(0, targetDistance - cursor), flow, dripPipeDiameter(pipe.get('pipeRole')));
+      return loss;
+    }
+    for (let iteration = 0; iteration < 8; iteration += 1) {
+      const pipeFlows = calculatePipeFlows();
+      let maximumChange = 0;
+      emitters.forEach(function (emitter) {
+        const lateral = emitter.pipe;
         const path = [];
         let cursor = lateral; const visited = new Set();
         while (cursor && !visited.has(cursor.get('pipeId'))) {
@@ -936,25 +1013,25 @@
         }
         let friction = 0;
         path.forEach(function (pipe, pathIndex) {
-          const coordinates = pipe.getGeometry().getCoordinates();
-          let length = point.distance;
-          if (pipe !== lateral) {
-            const child = path[pathIndex + 1];
-            const savedDistance = child ? Number(child.get('parentDistance')) : NaN;
-            length = Number.isFinite(savedDistance) ? Math.max(0, Math.min(distanceMeters(coordinates), savedDistance)) : child ? distanceAlongCoordinates(coordinates, child.getGeometry().getFirstCoordinate()) : distanceMeters(coordinates);
-          }
-          friction += hazenWilliamsLoss(length, downstreamEmitterCount(pipe.get('pipeId'), new Set()) * nominalFlow, dripPipeDiameter(pipe.get('pipeRole')));
+          const child = path[pathIndex + 1];
+          const length = pipe === lateral ? emitter.distance : child ? Math.max(0, Number(child.get('parentDistance')) || 0) : distanceMeters(pipe.getGeometry().getCoordinates());
+          friction += lossToDistance(pipe, length, pipeFlows);
         });
         const entry = entryByNumber.get(lateral.get('entryNumber'));
         const sourceElevation = entry ? elevationAtCoordinate(entry.getGeometry().getCoordinates()) : null;
-        const emitterElevation = elevationAtCoordinate(point.coordinate);
+        const emitterElevation = elevationAtCoordinate(emitter.coordinate);
         const elevationRise = sourceElevation !== null && emitterElevation !== null ? emitterElevation - sourceElevation : 0;
         const pressureHead = Math.max(0, designHead - friction - elevationRise);
         const pcMinimumHead = 7.14;
         const pressureFactor = pc ? (pressureHead >= pcMinimumHead ? 1 : Math.sqrt(pressureHead / pcMinimumHead)) : Math.sqrt(pressureHead / Math.max(.1, designHead));
-        emitters.push({ coordinate: point.coordinate, pipe: lateral, pressureBar: pressureHead / 10.197, flowLh: nominalFlow * Math.max(0, pressureFactor), pressureDeficient: pc ? pressureHead < pcMinimumHead : pressureFactor < .95 });
+        const flow = nominalFlow * Math.max(0, pressureFactor);
+        maximumChange = Math.max(maximumChange, Math.abs(flow - emitter.flowLh));
+        emitter.pressureBar = pressureHead / 10.197;
+        emitter.flowLh = flow;
+        emitter.pressureDeficient = pc ? pressureHead < pcMinimumHead : pressureFactor < .95;
       });
-    });
+      if (maximumChange < .0001) break;
+    }
     const predictedFlow = emitters.reduce(function (sum, emitter) { return sum + emitter.flowLh; }, 0);
     const requiredFlow = emitters.length * nominalFlow;
     const capacity = numberValue('drip-capacity', 2000);
@@ -968,6 +1045,7 @@
       emitter.flowLh *= deliveryScale;
       emitter.flowDeficient = emitter.flowLh < nominalFlow * .995;
       emitter.targetFlowLh = nominalFlow;
+      if (capacityLimited) emitter.pressureDeficient = false;
     });
     const totalFlow = predictedFlow * deliveryScale;
     const pressures = emitters.map(function (emitter) { return emitter.pressureBar; });
@@ -986,13 +1064,13 @@
       minimumLateralFlowLh: minimumLateralFlowLh,
       maximumSupportedEmitters: Math.floor(capacity / nominalFlow),
       zonesRequired: capacityLimited ? Math.ceil(requiredFlow / capacity) : 1,
-      minPressureBar: pressures.length ? Math.min.apply(Math, pressures) : 0,
-      maxPressureBar: pressures.length ? Math.max.apply(Math, pressures) : 0,
+      minPressureBar: capacityLimited || !pressures.length ? null : Math.min.apply(Math, pressures),
+      maxPressureBar: capacityLimited || !pressures.length ? null : Math.max.apply(Math, pressures),
       lowPressureCount: emitters.filter(function (emitter) { return emitter.pressureDeficient; }).length,
       lowFlowCount: emitters.filter(function (emitter) { return emitter.flowDeficient; }).length,
       averageDeliveredFlowLh: emitters.length ? totalFlow / emitters.length : 0,
       targetEmitterFlowLh: nominalFlow,
-      uniformity: average ? lowAverage / average * 100 : 0,
+      uniformity: capacityLimited ? null : average ? lowAverage / average * 100 : 0,
       pipeCount: pipes.length,
       lateralCount: pipes.filter(function (pipe) { return pipe.get('pipeRole') === 'dripline'; }).length
     };
@@ -1148,6 +1226,7 @@
     waterBackgroundLayer = null;
     waterSurfaceSource.changed();
     document.getElementById('water-timeline').hidden = true;
+    document.getElementById('water-legend').hidden = true;
   }
 
   function totalZoneArea() {
@@ -1156,23 +1235,86 @@
     return area;
   }
 
-  function pipeMetrics(flowLitersMinute, diameterMm) {
-    let length = 0; let terrainLift = 0;
-    waterPipeSource.getFeatures().forEach(function (feature) {
-      const coordinates = feature.getGeometry().getCoordinates();
-      length += distanceMeters(coordinates);
-      const startElevation = elevationAtCoordinate(coordinates[0]);
-      if (startElevation === null) return;
-      coordinates.forEach(function (coordinate) {
-        const elevation = elevationAtCoordinate(coordinate);
-        if (elevation !== null) terrainLift = Math.max(terrainLift, elevation - startElevation);
-      });
+  function irrigationNetworkMetrics(entryFeatures, outlets, totalFlow, diameterMm) {
+    const pipes = waterPipeSource.getFeatures().filter(function (pipe) { return (pipe.get('pipeRole') || 'delivery') === 'delivery'; });
+    const byId = new Map(); const children = new Map(); const flowById = new Map();
+    pipes.forEach(function (pipe) { byId.set(pipe.get('pipeId'), pipe); children.set(pipe.get('pipeId'), []); flowById.set(pipe.get('pipeId'), 0); });
+    pipes.forEach(function (pipe) {
+      const parentId = pipe.get('parentPipe');
+      if (parentId && children.has(parentId)) children.get(parentId).push(pipe);
     });
-    const q = flowLitersMinute / 60000;
-    const diameter = diameterMm / 1000;
-    const velocity = diameter > 0 ? q / (Math.PI * diameter * diameter / 4) : 0;
-    const loss = length && q && diameter ? 10.67 * length * Math.pow(q, 1.852) / (Math.pow(140, 1.852) * Math.pow(diameter, 4.87)) : 0;
-    return { length: length, lift: terrainLift, loss: loss, velocity: velocity };
+    outlets.forEach(function (outlet) {
+      let pipe = outlet.pipe; const visited = new Set(); const outletFlow = totalFlow * outlet.weight;
+      while (pipe && !visited.has(pipe.get('pipeId'))) {
+        const pipeId = pipe.get('pipeId'); visited.add(pipeId);
+        flowById.set(pipeId, (flowById.get(pipeId) || 0) + outletFlow);
+        pipe = byId.get(pipe.get('parentPipe'));
+      }
+    });
+    function pipeLossToDistance(pipe, targetDistance) {
+      const pipeId = pipe.get('pipeId');
+      const events = (children.get(pipeId) || []).map(function (child) {
+        return { distance: Math.max(0, Number(child.get('parentDistance')) || 0), flow: flowById.get(child.get('pipeId')) || 0 };
+      }).sort(function (a, b) { return a.distance - b.distance; });
+      let cursor = 0; let flow = flowById.get(pipeId) || 0; let loss = 0;
+      events.forEach(function (event) {
+        if (event.distance >= targetDistance) return;
+        const end = Math.max(cursor, Math.min(targetDistance, event.distance));
+        loss += hazenWilliamsLoss(end - cursor, flow * 60, diameterMm);
+        cursor = end; flow = Math.max(0, flow - event.flow);
+      });
+      loss += hazenWilliamsLoss(Math.max(0, targetDistance - cursor), flow * 60, diameterMm);
+      return loss;
+    }
+    function maximumElevationToDistance(pipe, targetDistance) {
+      const coordinates = pipe.getGeometry().getCoordinates();
+      let travelled = 0; let maximum = -Infinity;
+      for (let i = 0; i < coordinates.length; i += 1) {
+        if (i > 0 && travelled >= targetDistance) break;
+        const coordinate = coordinates[i];
+        const elevation = elevationAtCoordinate(coordinate);
+        if (elevation !== null) maximum = Math.max(maximum, elevation);
+        if (i + 1 >= coordinates.length) continue;
+        const segmentLength = distanceMeters([coordinate, coordinates[i + 1]]);
+        if (travelled + segmentLength >= targetDistance && segmentLength > 0) {
+          const progress = (targetDistance - travelled) / segmentLength;
+          const point = [coordinate[0] + (coordinates[i + 1][0] - coordinate[0]) * progress, coordinate[1] + (coordinates[i + 1][1] - coordinate[1]) * progress];
+          const partialElevation = elevationAtCoordinate(point);
+          if (partialElevation !== null) maximum = Math.max(maximum, partialElevation);
+          break;
+        }
+        travelled += segmentLength;
+      }
+      return maximum;
+    }
+    const entries = new Map();
+    entryFeatures.forEach(function (entry) { entries.set(entry.get('entryNumber'), entry); });
+    let criticalLoss = 0; let criticalLift = 0; let criticalDynamicHead = 0;
+    outlets.forEach(function (outlet) {
+      if (!outlet.pipe) return;
+      const path = []; let pipe = outlet.pipe; const visited = new Set();
+      while (pipe && !visited.has(pipe.get('pipeId'))) { visited.add(pipe.get('pipeId')); path.unshift(pipe); pipe = byId.get(pipe.get('parentPipe')); }
+      const entry = entries.get(outlet.pipe.get('entryNumber'));
+      const sourceElevation = entry ? elevationAtCoordinate(entry.getGeometry().getCoordinates()) : null;
+      let loss = 0; let maximumElevation = sourceElevation === null ? -Infinity : sourceElevation;
+      path.forEach(function (pathPipe, index) {
+        const child = path[index + 1];
+        const targetDistance = child ? Math.max(0, Number(child.get('parentDistance')) || 0) : distanceMeters(pathPipe.getGeometry().getCoordinates());
+        loss += pipeLossToDistance(pathPipe, targetDistance);
+        maximumElevation = Math.max(maximumElevation, maximumElevationToDistance(pathPipe, targetDistance));
+      });
+      const lift = sourceElevation === null || !Number.isFinite(maximumElevation) ? 0 : Math.max(0, maximumElevation - sourceElevation);
+      if (loss + lift > criticalDynamicHead) { criticalDynamicHead = loss + lift; criticalLoss = loss; criticalLift = lift; }
+    });
+    let length = 0; let maximumVelocity = 0; let maximumFlow = 0;
+    pipes.forEach(function (pipe) {
+      const flow = flowById.get(pipe.get('pipeId')) || 0;
+      const pipeLength = distanceMeters(pipe.getGeometry().getCoordinates());
+      const q = flow / 60000; const diameter = diameterMm / 1000;
+      length += pipeLength; maximumFlow = Math.max(maximumFlow, flow);
+      if (diameter > 0) maximumVelocity = Math.max(maximumVelocity, q / (Math.PI * diameter * diameter / 4));
+    });
+    return { length: length, lift: criticalLift, loss: criticalLoss, velocity: maximumVelocity, maximumFlow: maximumFlow || totalFlow };
   }
 
   function recommendedPipe(flowLitersMinute) {
@@ -1187,8 +1329,22 @@
     return liters >= 1000 ? (liters / 1000).toFixed(2) + ' m³' : Math.round(liters).toLocaleString() + ' L';
   }
 
+  function formatPower(kilowatts) {
+    if (kilowatts <= 0) return '0 W';
+    if (kilowatts < .001) return '<1 W';
+    if (kilowatts < .01) return (kilowatts * 1000).toFixed(1).replace(/\.0$/, '') + ' W';
+    return kilowatts.toFixed(2) + ' kW / ' + (kilowatts * 1.341).toFixed(2) + ' hp';
+  }
+
+  function formatSolarPower(kilowattsPeak) {
+    if (kilowattsPeak <= 0) return '0 Wp';
+    if (kilowattsPeak < .001) return '<1 Wp';
+    if (kilowattsPeak < .01) return (kilowattsPeak * 1000).toFixed(1).replace(/\.0$/, '') + ' Wp';
+    return kilowattsPeak.toFixed(2) + ' kWp';
+  }
+
   function showSizingResults(zoneArea, designFlow, hydraulicFlow, pipe, demandLitersDay) {
-    const recommended = recommendedPipe(hydraulicFlow);
+    const recommended = recommendedPipe(pipe.maximumFlow || hydraulicFlow);
     const pressureHead = numberValue('water-pressure', 2.5) * 10.197;
     const totalHead = pressureHead + numberValue('water-source-lift', 0) + pipe.lift + pipe.loss;
     const efficiency = numberValue('pump-efficiency', 65) / 100;
@@ -1198,9 +1354,9 @@
     const solarKwp = pumpKw * operatingHours / (solarHours * .75);
     const panelCount = Math.ceil(solarKwp / .55);
     document.getElementById('water-demand').textContent = formatVolume(demandLitersDay) + '/day · ' + Math.round(designFlow * 60).toLocaleString() + ' L/h (' + designFlow.toFixed(1) + ' L/min)';
-    document.getElementById('water-pipe-result').textContent = pipe.length.toFixed(1) + ' m drawn · test ' + numberValue('water-diameter', 25) + ' mm: ' + pipe.loss.toFixed(1) + ' m loss, ' + pipe.velocity.toFixed(1) + ' m/s · suggested ≥ ' + recommended + ' mm';
-    document.getElementById('water-pump').textContent = pumpKw.toFixed(2) + ' kW / ' + (pumpKw * 1.341).toFixed(2) + ' hp · ' + totalHead.toFixed(1) + ' m head';
-    document.getElementById('water-solar').textContent = solarKwp.toFixed(2) + ' kWp · about ' + panelCount + ' × 550 W panels';
+    document.getElementById('water-pipe-result').textContent = pipe.length.toFixed(1) + ' m drawn · test ' + numberValue('water-diameter', 25) + ' mm ID: critical path ' + pipe.loss.toFixed(1) + ' m loss, maximum ' + pipe.velocity.toFixed(1) + ' m/s · suggested ≥ ' + recommended + ' mm';
+    document.getElementById('water-pump').textContent = formatPower(pumpKw) + ' · ' + totalHead.toFixed(1) + ' m head';
+    document.getElementById('water-solar').textContent = formatSolarPower(solarKwp) + ' · about ' + panelCount + ' × 550 W panels';
     document.getElementById('water-demand-row').hidden = false;
     document.getElementById('water-pump-row').hidden = false;
     document.getElementById('water-solar-row').hidden = false;
@@ -1221,11 +1377,13 @@
     clearWaterSurface();
     const entryCoordinates = entries.map(function (feature) { return feature.getGeometry().getCoordinates(); });
     const drawnArea = totalZoneArea();
-    const zoneArea = drawnArea || surveyAreaSquareMeters;
+    const grid = buildHydrologyGrid();
+    const zoneArea = drawnArea || grid.validArea || surveyAreaSquareMeters;
     const dailyDemand = zoneArea * numberValue('water-depth', 5);
     const designFlow = dailyDemand / (numberValue('water-hours', 6) * 60);
     const hydraulicFlow = Math.max(designFlow, totalFlow);
-    const pipe = pipeMetrics(hydraulicFlow, numberValue('water-diameter', 25));
+    const outlets = irrigationOutlets(entries);
+    const pipe = irrigationNetworkMetrics(entries, outlets, hydraulicFlow, numberValue('water-diameter', 25));
     showSizingResults(zoneArea, designFlow, hydraulicFlow, pipe, dailyDemand);
     if (!entryCoordinates.length) {
       document.getElementById('water-applied').textContent = '0 L per run';
@@ -1237,23 +1395,19 @@
       document.getElementById('water-status').textContent = 'Sizing calculated. Add at least one water entry to run the hydraulic simulation.';
       return Promise.resolve();
     }
-    const connectedPipes = waterPipeSource.getFeatures();
-    const outlets = irrigationOutlets(entries);
+    const connectedPipes = waterPipeSource.getFeatures().filter(function (feature) { return (feature.get('pipeRole') || 'delivery') === 'delivery'; });
     if (connectedPipes.length) {
-      let maximumOutletFlow = 0;
-      outlets.forEach(function (outlet) { if (outlet.direction) maximumOutletFlow = Math.max(maximumOutletFlow, totalFlow * outlet.weight); });
-      const outletHydraulics = pipeMetrics(maximumOutletFlow, numberValue('water-diameter', 25));
-      if (outletHydraulics.velocity > 3) {
+      const runHydraulics = irrigationNetworkMetrics(entries, outlets, totalFlow, numberValue('water-diameter', 25));
+      if (runHydraulics.velocity > 3) {
         document.getElementById('water-applied').textContent = formatVolume(applied) + ' per run';
         document.getElementById('water-infiltration').textContent = '—';
         document.getElementById('water-runoff').textContent = '—';
         document.getElementById('water-path').textContent = 'Pipe discharge exceeds safe test range';
         document.getElementById('water-results').hidden = false;
-        document.getElementById('water-status').textContent = 'Pipe flow is ' + outletHydraulics.velocity.toFixed(1) + ' m/s. Reduce flow or increase the pipe to at least ' + recommendedPipe(maximumOutletFlow) + ' mm before simulating.';
+        document.getElementById('water-status').textContent = 'Maximum pipe velocity is ' + runHydraulics.velocity.toFixed(1) + ' m/s. Reduce flow or increase the highest-flow pipe to at least ' + recommendedPipe(runHydraulics.maximumFlow) + ' mm before simulating.';
         return Promise.resolve();
       }
     }
-    const grid = buildHydrologyGrid();
     document.getElementById('water-status').textContent = 'Running Green–Ampt infiltration and 2D diffusion-wave routing…';
     return solveHydrology({ mode: 'irrigation', totalMinutes: duration, totalFlow: totalFlow, sourceWeights: sourceWeightsFromOutlets(grid, outlets, totalFlow, numberValue('water-diameter', 25)), soil: soil }).then(function (solved) {
       const infiltrated = solved.infiltratedLiters;
@@ -1264,7 +1418,7 @@
       document.getElementById('water-applied').textContent = formatVolume(solved.appliedLiters) + ' per run';
       document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(infiltrated / Math.max(1, solved.appliedLiters) * 100) + '%)';
       document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round(runoff / Math.max(1, solved.appliedLiters) * 100) + '%)';
-      document.getElementById('water-path').textContent = '2D diffusion wave · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm · ' + formatVolume(solved.outflowLiters) + ' left survey';
+      document.getElementById('water-path').textContent = '2D diffusion wave · grid-estimated maximum depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm · ' + formatVolume(solved.outflowLiters) + ' approximate outflow';
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-legend').hidden = false;
       const allocation = document.getElementById('water-flow-basis').value === 'total' ? formatVolume(totalFlow) + '/min shared across ' + entries.length + ' entries and ' + outlets.length + ' terminal outlets' : formatVolume(flowPerEntry) + '/min per entry across ' + outlets.length + ' terminal outlets';
@@ -1311,8 +1465,8 @@
     const solarKwp = runEnergy / (numberValue('drip-solar-hours', 5) * .75);
     document.getElementById('water-pipe-result').textContent = roleLengths.mainline.toFixed(0) + ' m main · ' + roleLengths.submain.toFixed(0) + ' m submain · ' + roleLengths.dripline.toFixed(0) + ' m dripline';
     document.getElementById('water-demand').textContent = network.requiredFlowLh.toFixed(0) + ' L/h required · ' + network.availableFlowLh.toFixed(0) + ' L/h available' + (network.capacityLimited ? ' (' + (network.capacityRatio * 100).toFixed(1) + '%)' : '');
-    document.getElementById('water-pump').textContent = pumpKw.toFixed(2) + ' kW hydraulic minimum · ' + network.requiredFlowLh.toFixed(0) + ' L/h at ' + head.toFixed(1) + ' m head';
-    document.getElementById('water-solar').textContent = solarKwp.toFixed(2) + ' kWp minimum run energy · size from the selected pump and controller';
+    document.getElementById('water-pump').textContent = formatPower(pumpKw) + ' hydraulic minimum · ' + network.requiredFlowLh.toFixed(0) + ' L/h at ' + head.toFixed(1) + ' m source head';
+    document.getElementById('water-solar').textContent = formatSolarPower(solarKwp) + ' minimum run energy · size from the selected pump and controller';
     if (network.severelyCapacityLimited) {
       const supported = Math.min(network.emitters.length, network.maximumSupportedEmitters);
       document.getElementById('water-low-pressure-key').hidden = true;
@@ -1354,15 +1508,15 @@
       document.getElementById('water-applied').textContent = formatVolume(solved.appliedLiters) + ' per run';
       document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(infiltrated / Math.max(1, solved.appliedLiters) * 100) + '%)';
       document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round(runoff / Math.max(1, solved.appliedLiters) * 100) + '%)';
-      document.getElementById('water-path').textContent = network.capacityLimited ? 'Capacity-limited approximation · verify operating pressure with the pump and emitter curves' : network.minPressureBar.toFixed(2) + '–' + network.maxPressureBar.toFixed(2) + ' bar at emitters · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm';
+      document.getElementById('water-path').textContent = network.capacityLimited ? 'Capacity-limited approximation · verify operating pressure with the pump and emitter curves' : network.minPressureBar.toFixed(2) + '–' + network.maxPressureBar.toFixed(2) + ' bar at emitters · grid-estimated maximum depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm';
       document.getElementById('water-drip-summary').textContent = network.emitters.length + ' emitters on ' + network.lateralCount + ' lateral' + (network.lateralCount === 1 ? '' : 's') + ' · ' + network.totalFlowLh.toFixed(0) + ' L/h delivered' + (network.lowFlowCount ? ' · ' + network.lowFlowCount + ' below target (' + network.averageDeliveredFlowLh.toFixed(2) + ' / ' + network.targetEmitterFlowLh.toFixed(2) + ' L/h avg)' : '') + (network.lowPressureCount ? ' · ' + network.lowPressureCount + ' low pressure' : '');
-      document.getElementById('water-uniformity').textContent = network.capacityLimited ? 'Not validated — capped flow is distributed evenly for this planning preview' : network.uniformity.toFixed(1) + '% modeled hydraulic EU · ideal ' + (document.getElementById('drip-emitter-type').value === 'pc' ? 'pressure-compensating' : 'non-compensating') + ' emitters; field EU will be lower';
+      document.getElementById('water-uniformity').textContent = network.capacityLimited ? 'Not validated — capped flow is distributed evenly for this planning preview' : network.uniformity.toFixed(1) + '% modeled low-quarter DU · ideal ' + (document.getElementById('drip-emitter-type').value === 'pc' ? 'pressure-compensating' : 'non-compensating') + ' emitters; field DU will be lower';
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-legend').hidden = false;
       const warnings = [];
       if (network.capacityLimited) warnings.push('source capacity is ' + (network.capacityRatio * 100).toFixed(1) + '% of demand; wetting uses an evenly capped-flow approximation and pressure is not validated');
-      if (network.uniformity < 90) warnings.push('emission uniformity is below 90%');
-      if (network.lowPressureCount) warnings.push(network.lowPressureCount + ' emitter' + (network.lowPressureCount === 1 ? ' is' : 's are') + ' below required pressure (marked red)');
+      if (!network.capacityLimited && network.uniformity < 90) warnings.push('low-quarter distribution uniformity is below 90%');
+      if (!network.capacityLimited && network.lowPressureCount) warnings.push(network.lowPressureCount + ' emitter' + (network.lowPressureCount === 1 ? ' is' : 's are') + ' below required pressure (marked red)');
       document.getElementById('water-status').textContent = warnings.length ? 'Drip design warning: ' + warnings.join('; ') + '.' : 'Drip network simulated: pressure, emitter discharge, infiltration and localized wetting are within the configured limits.';
     });
   }
@@ -1385,7 +1539,7 @@
       document.getElementById('water-applied').textContent = formatVolume(solved.appliedLiters) + ' over survey (' + rainDepth.toFixed(1) + ' mm)';
       document.getElementById('water-infiltration').textContent = formatVolume(infiltrated) + ' (' + Math.round(infiltrated / Math.max(1, solved.appliedLiters) * 100) + '%)';
       document.getElementById('water-runoff').textContent = formatVolume(runoff) + ' (' + Math.round(runoff / Math.max(1, solved.appliedLiters) * 100) + '%)';
-      document.getElementById('water-path').textContent = '2D diffusion wave · maximum surface depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm · ' + formatVolume(solved.outflowLiters) + ' left survey';
+      document.getElementById('water-path').textContent = '2D diffusion wave · grid-estimated maximum depth ' + (solved.maxDepth * 100).toFixed(1) + ' cm · ' + formatVolume(solved.outflowLiters) + ' approximate outflow';
       document.getElementById('water-results').hidden = false;
       document.getElementById('water-legend').hidden = false;
       document.getElementById('water-status').textContent = 'Green–Ampt infiltration + mass-conserving 2D diffusion wave · ' + intensity + ' mm/h for ' + duration + ' min · ' + formatVolume(solved.surfaceLiters) + ' stored on surface at event end.';
@@ -1523,7 +1677,9 @@
       const match = String(pipe.get('pipeId') || '').match(/(\d+)$/);
       if (match) waterPipeSequence = Math.max(waterPipeSequence, Number(match[1]) + 1);
     });
-    document.getElementById('water-opacity-value').textContent = Math.round(Number(document.getElementById('water-opacity').value) * 100) + '%';
+    const waterOpacity = Number(document.getElementById('water-opacity').value);
+    waterSurfaceLayer.setOpacity(waterOpacity);
+    document.getElementById('water-opacity-value').textContent = Math.round(waterOpacity * 100) + '%';
     restoringWaterPlan = false;
     autoSaveWaterPlan();
     const extent = ol.extent.createEmpty();
@@ -1677,6 +1833,7 @@
     autoSaveWaterPlan();
     document.getElementById('water-status').textContent = waterEntrySource.getFeatures().length + ' water entr' + (waterEntrySource.getFeatures().length === 1 ? 'y' : 'ies') + ' added.';
   });
+  waterSurfaceLayer.setOpacity(Number(document.getElementById('water-opacity').value));
   if (!restoreAutoSavedWaterPlan()) updateWaterMode();
 
   function refreshQuickButtons() {

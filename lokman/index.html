@@ -91,7 +91,7 @@
               <label>Flow <span class="flow-input"><input id="water-flow" type="number" min="0.5" max="250000" step="0.5" value="8"><select id="water-flow-unit" aria-label="Flow unit"><option value="minute">L/min</option><option value="hour">L/h</option></select></span></label>
               <label>Flow allocation <select id="water-flow-basis"><option value="per-entry">Per entry</option><option value="total">Total shared</option></select></label>
               <label>Duration <span><input id="water-duration" type="number" min="1" max="720" step="1" value="20"> min</span></label>
-              <label>Test pipe <span><input id="water-diameter" type="number" min="8" max="200" step="1" value="25"> mm</span></label>
+              <label>Test pipe ID <span><input id="water-diameter" type="number" min="8" max="200" step="1" value="25"> mm</span></label>
               <label>Outlet pressure <span><input id="water-pressure" type="number" min="0.1" max="10" step="0.1" value="2.5"> bar</span></label>
               <label>Source lift <span><input id="water-source-lift" type="number" min="0" max="300" step="0.5" value="0"> m</span></label>
               <label>Watering target <span><input id="water-depth" type="number" min="0.1" max="50" step="0.1" value="5"> mm/day</span></label>
@@ -104,13 +104,13 @@
               <label>Duration <span><input id="rain-duration" type="number" min="1" max="1440" step="1" value="60"> min</span></label>
             </div>
             <div id="water-drip-fields" hidden>
-              <label>Mainline diameter <span><input id="drip-main-diameter" type="number" min="20" max="250" step="1" value="40"> mm</span></label>
-              <label>Submain diameter <span><input id="drip-submain-diameter" type="number" min="16" max="200" step="1" value="32"> mm</span></label>
-              <label>Dripline diameter <span><input id="drip-lateral-diameter" type="number" min="12" max="32" step="1" value="16"> mm</span></label>
+              <label>Mainline ID <span><input id="drip-main-diameter" type="number" min="20" max="250" step="1" value="40"> mm</span></label>
+              <label>Submain ID <span><input id="drip-submain-diameter" type="number" min="16" max="200" step="1" value="32"> mm</span></label>
+              <label>Dripline ID <span><input id="drip-lateral-diameter" type="number" min="12" max="32" step="1" value="16"> mm</span></label>
               <label>Emitter spacing <span><input id="drip-emitter-spacing" type="number" min="0.1" max="20" step="0.1" value="1"> m</span></label>
               <label>Emitter flow / outlet <span><input id="drip-emitter-flow" type="number" min="0.1" max="20" step="0.1" value="2"> L/h</span></label>
               <label>Emitter type <select id="drip-emitter-type"><option value="pc" selected>Pressure compensating</option><option value="non-pc">Non-compensating</option></select></label>
-              <label>Design pressure <span><input id="drip-pressure" type="number" min="0.2" max="6" step="0.1" value="1.2"> bar</span></label>
+              <label>Source pressure <span><input id="drip-pressure" type="number" min="0.2" max="6" step="0.1" value="1.2"> bar</span></label>
               <label>Source capacity <span><input id="drip-capacity" type="number" min="1" max="250000" step="1" value="2000"> L/h</span></label>
               <label>Source lift <span><input id="drip-source-lift" type="number" min="0" max="300" step="0.5" value="0"> m</span></label>
               <label>Pump efficiency <span><input id="drip-pump-efficiency" type="number" min="20" max="95" step="1" value="65"> %</span></label>
@@ -133,18 +133,18 @@
             <button id="water-load" type="button">↑ Load plan</button>
             <input id="water-plan-file" type="file" accept=".json,application/json" hidden>
           </div>
-          <label class="water-opacity-control" for="water-opacity"><span>Simulation opacity</span><input id="water-opacity" type="range" min="0.1" max="1" step="0.05" value="1" aria-label="Water simulation opacity"><output id="water-opacity-value" for="water-opacity">100%</output></label>
+          <label class="water-opacity-control" for="water-opacity"><span>Simulation opacity</span><input id="water-opacity" type="range" min="0.1" max="1" step="0.05" value="0.7" aria-label="Water simulation opacity"><output id="water-opacity-value" for="water-opacity">70%</output></label>
           <dl id="water-results" class="water-results" hidden>
             <div><dt>Applied</dt><dd id="water-applied">—</dd></div>
             <div><dt>Estimated infiltration</dt><dd id="water-infiltration">—</dd></div>
-            <div><dt>Surface runoff</dt><dd id="water-runoff">—</dd></div>
+            <div><dt>Surface water + outflow</dt><dd id="water-runoff">—</dd></div>
             <div><dt>Flow path / drop</dt><dd id="water-path">—</dd></div>
             <div id="water-pipe-result-row"><dt>Pipe plan</dt><dd id="water-pipe-result">—</dd></div>
             <div id="water-demand-row"><dt>Zone demand</dt><dd id="water-demand">—</dd></div>
             <div id="water-pump-row"><dt>Pump estimate</dt><dd id="water-pump">—</dd></div>
             <div id="water-solar-row"><dt>Solar estimate</dt><dd id="water-solar">—</dd></div>
             <div id="water-drip-summary-row" hidden><dt>Drip network</dt><dd id="water-drip-summary">—</dd></div>
-            <div id="water-uniformity-row" hidden><dt>Emission uniformity</dt><dd id="water-uniformity">—</dd></div>
+            <div id="water-uniformity-row" hidden><dt>Low-quarter DU</dt><dd id="water-uniformity">—</dd></div>
           </dl>
           <p id="water-status" class="water-status" aria-live="polite">Add entry points and pipe routes, or choose rainfall.</p>
         </section>
@@ -222,6 +222,6 @@
     };
   </script>
   <script src="../viewer.js"></script>
-  <script src="../map.js"></script>
+  <script src="../map.js?v=20260828-accuracy-2"></script>
 </body>
 </html>

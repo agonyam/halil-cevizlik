@@ -17,8 +17,11 @@ self.onmessage = function (event) {
     const southFlux = new Float32Array(size);
     const boundaryFlux = new Float32Array(size);
     const totalSeconds = Math.max(1, input.totalMinutes * 60);
-    const steps = Math.min(1440, Math.max(120, Math.ceil(totalSeconds / 10)));
+    const referenceStepSeconds = 10;
+    const referenceDrainFraction = .45;
+    const steps = Math.min(5760, Math.max(120, Math.ceil(totalSeconds / 2.5)));
     const dt = totalSeconds / steps;
+    const maximumDrainFraction = 1 - Math.pow(1 - referenceDrainFraction, dt / referenceStepSeconds);
     const snapshotCount = Math.min(61, steps + 1);
     const snapshotScale = .0005;
     const infiltrationSnapshotScale = .0005;
@@ -44,11 +47,17 @@ self.onmessage = function (event) {
         if (!valid[i]) continue;
         snapshot[i] = Math.min(65535, Math.round(water[i] / snapshotScale));
         infiltrationSnapshot[i] = Math.min(65535, Math.round(cumulativeInfiltration[i] / infiltrationSnapshotScale));
-        maxDepth = Math.max(maxDepth, water[i]);
-        maxInfiltrationDepth = Math.max(maxInfiltrationDepth, cumulativeInfiltration[i]);
       }
       snapshots.push(snapshot);
       infiltrationSnapshots.push(infiltrationSnapshot);
+    }
+
+    function updateMaxima() {
+      for (let i = 0; i < size; i += 1) {
+        if (!valid[i]) continue;
+        maxDepth = Math.max(maxDepth, water[i]);
+        maxInfiltrationDepth = Math.max(maxInfiltrationDepth, cumulativeInfiltration[i]);
+      }
     }
 
     function edgeFlux(first, second, distance) {
@@ -68,6 +77,13 @@ self.onmessage = function (event) {
       return difference > 0 ? depthTransfer : -depthTransfer;
     }
 
+    function openBoundaryDischarge(index, inward, distance, edgeWidth) {
+      if (inward < 0 || inward >= size || !valid[inward] || water[index] <= 1e-7) return 0;
+      const surfaceDrop = elevation[inward] - elevation[index] + water[index];
+      const slope = Math.max(0, Math.min(1, surfaceDrop / distance));
+      return slope ? Math.pow(water[index], 5 / 3) * Math.sqrt(slope) / manning * edgeWidth : 0;
+    }
+
     captureSnapshot();
     for (let step = 1; step <= steps; step += 1) {
       for (let i = 0; i < size; i += 1) {
@@ -84,6 +100,7 @@ self.onmessage = function (event) {
         cumulativeInfiltration[i] += infiltrated;
         infiltratedVolume += infiltrated * input.cellArea;
       }
+      updateMaxima();
 
       outgoing.fill(0); eastFlux.fill(0); southFlux.fill(0); boundaryFlux.fill(0); delta.fill(0);
       for (let y = 0; y < height; y += 1) {
@@ -92,14 +109,13 @@ self.onmessage = function (event) {
           if (!valid[index]) continue;
           if (x + 1 < width) eastFlux[index] = edgeFlux(index, index + 1, input.cellWidth);
           if (y + 1 < height) southFlux[index] = edgeFlux(index, index + width, input.cellHeight);
-          let openWidth = 0;
-          if (x === 0 || !valid[index - 1]) openWidth += input.cellHeight;
-          if (x === width - 1 || !valid[index + 1]) openWidth += input.cellHeight;
-          if (y === 0 || !valid[index - width]) openWidth += input.cellWidth;
-          if (y === height - 1 || !valid[index + width]) openWidth += input.cellWidth;
-          if (openWidth && water[index] > 0) {
-            const discharge = Math.pow(water[index], 5 / 3) * Math.sqrt(.01) / manning;
-            boundaryFlux[index] = discharge * dt * openWidth / input.cellArea;
+          let boundaryDischarge = 0;
+          if (x === 0 || !valid[index - 1]) boundaryDischarge += openBoundaryDischarge(index, x + 1 < width ? index + 1 : -1, input.cellWidth, input.cellHeight);
+          if (x === width - 1 || !valid[index + 1]) boundaryDischarge += openBoundaryDischarge(index, x > 0 ? index - 1 : -1, input.cellWidth, input.cellHeight);
+          if (y === 0 || !valid[index - width]) boundaryDischarge += openBoundaryDischarge(index, y + 1 < height ? index + width : -1, input.cellHeight, input.cellWidth);
+          if (y === height - 1 || !valid[index + width]) boundaryDischarge += openBoundaryDischarge(index, y > 0 ? index - width : -1, input.cellHeight, input.cellWidth);
+          if (boundaryDischarge) {
+            boundaryFlux[index] = boundaryDischarge * dt / input.cellArea;
             outgoing[index] += boundaryFlux[index];
           }
         }
@@ -110,24 +126,25 @@ self.onmessage = function (event) {
           if (!valid[index]) continue;
           if (x + 1 < width && eastFlux[index]) {
             const donor = eastFlux[index] > 0 ? index : index + 1;
-            const transfer = Math.abs(eastFlux[index]) * Math.min(1, water[donor] * .45 / Math.max(1e-12, outgoing[donor]));
+            const transfer = Math.abs(eastFlux[index]) * Math.min(1, water[donor] * maximumDrainFraction / Math.max(1e-12, outgoing[donor]));
             delta[donor] -= transfer;
             delta[donor === index ? index + 1 : index] += transfer;
           }
           if (y + 1 < height && southFlux[index]) {
             const donor = southFlux[index] > 0 ? index : index + width;
-            const transfer = Math.abs(southFlux[index]) * Math.min(1, water[donor] * .45 / Math.max(1e-12, outgoing[donor]));
+            const transfer = Math.abs(southFlux[index]) * Math.min(1, water[donor] * maximumDrainFraction / Math.max(1e-12, outgoing[donor]));
             delta[donor] -= transfer;
             delta[donor === index ? index + width : index] += transfer;
           }
           if (boundaryFlux[index]) {
-            const transfer = boundaryFlux[index] * Math.min(1, water[index] * .45 / Math.max(1e-12, outgoing[index]));
+            const transfer = boundaryFlux[index] * Math.min(1, water[index] * maximumDrainFraction / Math.max(1e-12, outgoing[index]));
             delta[index] -= transfer;
             outflowVolume += transfer * input.cellArea;
           }
         }
       }
       for (let i = 0; i < size; i += 1) if (valid[i]) water[i] = Math.max(0, water[i] + delta[i]);
+      updateMaxima();
 
       const targetSnapshot = Math.round(step / steps * (snapshotCount - 1));
       if (targetSnapshot > nextSnapshot || step === steps) {
